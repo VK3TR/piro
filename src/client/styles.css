@@ -46,6 +46,15 @@ button {
   border-radius: 6px;
 }
 
+@media (min-width: 900px) {
+  /* Wide screens (desktop, large tablets): use almost the full browser
+     width. Narrow screens keep the 640px column above. Adapts live to the
+     window size; no JavaScript and no user-agent detection. */
+  .panel {
+    max-width: none;
+  }
+}
+
 .panel__header {
   display: flex;
   align-items: center;
