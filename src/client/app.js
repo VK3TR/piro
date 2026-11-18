@@ -1122,6 +1122,11 @@ link.addEventListener('connected', (event) => {
   tunerBtn.disabled = false;
   tuneBtn.disabled = false;
   txPowerSelect.disabled = false;
+  digitalTxGainBtn.disabled = false;
+  // Push this browser's remembered digital-TX gain to the server (the
+  // generated FT8/WSPR/TTY audio is scaled server-side, see audio-bridge).
+  link.request('setDigitalTxGain', { db: digitalTxGainDb }).catch(() => {});
+  syncTxAdjustVisible();
   rxGainSlider.disabled = false;
   for (const btn of Object.values(freqStepButtonEls)) btn.disabled = false;
   for (const control of FUNCTION_CONTROLS) {
@@ -1758,6 +1763,7 @@ function updateSsbChip() {
     sstvModeBtn.classList.toggle('chip--active', sstvActive || faxActive || easypalActive);
     sstvModeBtn.textContent = sstvActive ? 'SSTV' : easypalActive ? 'EasyPal' : faxActive ? 'Fax' : 'Image';
   }
+  syncTxAdjustVisible();
 }
 
 function updateModeButtons(mode) {
@@ -5545,6 +5551,94 @@ micGainSelect.addEventListener('change', () => {
   } catch {
     // not remembered
   }
+});
+
+// --- Digital TX gain (FT8/FT4/WSPR/TTY/...) ---
+// A software drive control for the server-generated transmit audio, styled
+// and optioned like Mic gain. Remembered per browser; pushed to the server,
+// which scales the generated PCM (see audio-bridge.js#writeGenerated). The
+// digital-mode equivalent of WSJT-X's Pwr slider: set it while watching ALC.
+// Does not affect voice/mic TX.
+const DIGITAL_TX_GAIN_KEY = 'piro.digitalTxGainDb';
+const digitalTxGainEl = document.getElementById('digital-tx-gain');
+const digitalTxGainBtn = document.getElementById('digital-tx-gain-btn');
+const digitalTxGainPop = document.getElementById('digital-tx-gain-pop');
+const digitalTxGainSlider = document.getElementById('digital-tx-gain-slider');
+const digitalTxGainReadout = document.getElementById('digital-tx-gain-readout');
+const digitalTxGainClose = document.getElementById('digital-tx-gain-close');
+// Show TX Adjust only in app/digital modes that generate TX audio
+// (FT8/FT4/WSPR/TTY/JS8/VARA/SSTV/EasyPal/FreeDV); hidden in plain voice/CW
+// where it does nothing. Driven from updateSsbChip(), which runs on every
+// app-mode transition (the SSB chip follows appModeActive() too).
+function syncTxAdjustVisible() {
+  digitalTxGainEl.hidden = !appModeActive();
+  if (digitalTxGainEl.hidden) closeTxAdjustPop();
+}
+// TX Adjust is attenuation-only (0 to -40 dB): generated audio sits at a
+// reference level, and with the radio's USB MOD Level maxed
+// (CIV_MAXIMIZE_USB_LEVELS) you need big cuts to bring ALC down. At rest the
+// control shows just the dB value; tapping it opens a 1 dB slider (like
+// WSJT-X's Pwr) -- compact, and easier than an always-shown slider on mobile.
+let digitalTxGainDb = 0;
+try {
+  const saved = Number(localStorage.getItem(DIGITAL_TX_GAIN_KEY));
+  if (Number.isFinite(saved) && saved <= 0 && saved >= -40) digitalTxGainDb = Math.round(saved);
+} catch {
+  // private mode: not remembered
+}
+function fmtTxGain(db) {
+  return db < 0 ? `\u2212${-db} dB` : '0 dB';
+}
+function renderDigitalTxGain() {
+  const label = fmtTxGain(digitalTxGainDb);
+  digitalTxGainBtn.textContent = label;
+  digitalTxGainReadout.textContent = label;
+  digitalTxGainSlider.value = String(digitalTxGainDb);
+}
+renderDigitalTxGain();
+function openTxAdjustPop() {
+  digitalTxGainPop.hidden = false;
+  digitalTxGainBtn.setAttribute('aria-expanded', 'true');
+  digitalTxGainBtn.classList.add('tx-power__value--open');
+}
+function closeTxAdjustPop() {
+  digitalTxGainPop.hidden = true;
+  digitalTxGainBtn.setAttribute('aria-expanded', 'false');
+  digitalTxGainBtn.classList.remove('tx-power__value--open');
+}
+digitalTxGainBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (digitalTxGainPop.hidden) openTxAdjustPop();
+  else closeTxAdjustPop();
+});
+// Keep interactions inside the popover from closing it; tap elsewhere (or
+// Escape) closes it.
+digitalTxGainPop.addEventListener('click', (e) => e.stopPropagation());
+digitalTxGainClose.addEventListener('click', (e) => {
+  e.stopPropagation();
+  closeTxAdjustPop();
+});
+document.addEventListener('click', () => {
+  if (!digitalTxGainPop.hidden) closeTxAdjustPop();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !digitalTxGainPop.hidden) closeTxAdjustPop();
+});
+// Live readout + value while dragging; apply (save + tell the server) on release.
+digitalTxGainSlider.addEventListener('input', () => {
+  digitalTxGainDb = Number(digitalTxGainSlider.value);
+  const label = fmtTxGain(digitalTxGainDb);
+  digitalTxGainReadout.textContent = label;
+  digitalTxGainBtn.textContent = label;
+});
+digitalTxGainSlider.addEventListener('change', () => {
+  digitalTxGainDb = Number(digitalTxGainSlider.value);
+  try {
+    localStorage.setItem(DIGITAL_TX_GAIN_KEY, String(digitalTxGainDb));
+  } catch {
+    // not remembered
+  }
+  link.request('setDigitalTxGain', { db: digitalTxGainDb }).catch((err) => showError(err.message));
 });
 // Visible exactly when the PTT button is: the several places that show or
 // hide the PTT button and its section don't each need to know about it.

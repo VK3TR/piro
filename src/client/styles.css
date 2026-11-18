@@ -2016,3 +2016,67 @@ button {
 .scope__axis[hidden] {
   display: none;
 }
+
+/* TX Adjust: a compact dB value that opens a slider popover on tap. */
+#digital-tx-gain {
+  position: relative;
+}
+.tx-power__value {
+  cursor: pointer;
+}
+.tx-adjust-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 200px;
+  max-width: 70vw;
+  padding: 8px 10px;
+  background: var(--panel-raised);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+.tx-adjust-pop[hidden] {
+  display: none;
+}
+.tx-adjust-pop__slider {
+  flex: 1;
+  min-width: 100px;
+  accent-color: var(--led-green);
+  cursor: pointer;
+}
+.tx-adjust-pop__readout {
+  font-size: 0.8rem;
+  min-width: 3.3em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.tx-adjust-pop__close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tx-adjust-pop__close:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.tx-power__value--open {
+  outline: 2px solid var(--led-green);
+  outline-offset: 1px;
+}
