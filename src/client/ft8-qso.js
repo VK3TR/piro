@@ -137,6 +137,40 @@ export function gridField(grid) {
   return grid ? String(grid).toUpperCase().slice(0, 4) : '';
 }
 
+// A standard FT8 callsign — enough to tell a real "CQ CALL GRID" / reply
+// from free text like "MY QTH EM95PC": a 1-2 char prefix, a digit, then
+// 1-3 letters. Compound/portable calls aren't standard (they're hashed),
+// and wouldn't carry a plain grid field anyway.
+const CALLSIGN_RE = /^[A-Z0-9]{1,2}[0-9][A-Z]{1,3}$/;
+// The 6-character (subsquare) grid form specifically.
+const GRID6_RE = /^[A-R]{2}[0-9]{2}[A-X]{2}$/;
+
+// Trim a 6-character grid down to its 4-character subsquare, but ONLY in a
+// recognized standard message where the grid sits in the structured grid
+// field: a "CQ [qual] CALL GRID" with a real callsign, or a
+// "TOCALL FROMCALL GRID" reply between two real callsigns. Those 77-bit
+// messages carry only 4 grid chars there, so a 6-char token makes the
+// encoder drop the grid entirely (see gridField()). Free text can hold any
+// 13 characters, grid-like or not (e.g. "MY QTH EM95PC"), so it's left
+// untouched. Input is trimmed/uppercased by parseFt8Message().
+export function trimMessageGrid(text) {
+  const parsed = parseFt8Message(text);
+  const trimLast = () => {
+    const t = parsed.tokens.slice();
+    t[t.length - 1] = t[t.length - 1].slice(0, 4);
+    return t.join(' ');
+  };
+  if (parsed.isCq) {
+    return parsed.cqGrid && GRID6_RE.test(parsed.cqGrid) && CALLSIGN_RE.test(parsed.cqCall || '')
+      ? trimLast()
+      : parsed.raw;
+  }
+  return parsed.grid && GRID6_RE.test(parsed.grid)
+    && CALLSIGN_RE.test(parsed.toCall || '') && CALLSIGN_RE.test(parsed.fromCall || '')
+    ? trimLast()
+    : parsed.raw;
+}
+
 export function defaultCqMessage(callsign, grid) {
   if (!callsign || !grid) return '';
   return `CQ ${callsign.toUpperCase()} ${gridField(grid)}`;

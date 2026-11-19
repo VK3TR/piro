@@ -28,10 +28,11 @@ fs.copyFileSync(sourcePath, tmpPath);
 let parseFt8Message;
 let formatReport;
 let defaultCqMessage;
+let trimMessageGrid;
 let isRelatedToQso;
 let Ft8QsoSequencer;
 try {
-  ({ parseFt8Message, formatReport, defaultCqMessage, isRelatedToQso, Ft8QsoSequencer } = await import(
+  ({ parseFt8Message, formatReport, defaultCqMessage, isRelatedToQso, Ft8QsoSequencer, trimMessageGrid } = await import(
     `file://${tmpPath}`
   ));
 } finally {
@@ -129,6 +130,16 @@ check(defaultCqMessage('VK2IO', 'QF56MC') === 'CQ VK2IO QF56', 'defaultCqMessage
 check(defaultCqMessage(null, 'QF56') === '', 'defaultCqMessage returns empty string when the callsign is missing');
 check(defaultCqMessage('VK2IO', null) === '', 'defaultCqMessage returns empty string when the grid is missing');
 check(defaultCqMessage(null, null) === '', 'defaultCqMessage returns empty string when neither is configured');
+
+// --- trimMessageGrid() (composer free text at send time) ---
+check(trimMessageGrid('CQ W4PFI EM95PC') === 'CQ W4PFI EM95', 'trims a typed 6-char grid in a CQ to its 4-char subsquare');
+check(trimMessageGrid('VK3XU VK2IO QF56MC') === 'VK3XU VK2IO QF56', 'trims a typed 6-char grid in a reply to 4');
+check(trimMessageGrid('CQ W4PFI EM95') === 'CQ W4PFI EM95', 'leaves a 4-char grid untouched');
+check(trimMessageGrid('VK3XU VK2IO R-11') === 'VK3XU VK2IO R-11', 'leaves an acknowledged report untouched');
+check(trimMessageGrid('VK3XU VK2IO 73') === 'VK3XU VK2IO 73', 'leaves 73 untouched');
+check(trimMessageGrid('CQ W4PFI') === 'CQ W4PFI', 'leaves a grid-less CQ untouched');
+check(trimMessageGrid('MY QTH EM95PC') === 'MY QTH EM95PC', 'leaves free text (non-callsign tokens) untouched — a 6-char grid is valid in free text');
+check(trimMessageGrid('CQ DX VK2IO QF56MC') === 'CQ DX VK2IO QF56', 'trims a 6-char grid in a "CQ <qualifier> CALL GRID"');
 
 // A 6-character configured grid is likewise trimmed in the caller-role
 // Tx2 reply (us -> CQer, carrying our grid).
