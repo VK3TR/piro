@@ -127,9 +127,19 @@ export function formatReport(snr) {
  * an empty string if either isn't configured, rather than a
  * half-built/misleading message like "CQ null QF56" or "CQ VK2IO null".
  */
+// The standard FT8 "CQ <call> <grid>" and "<call> <call> <grid>"
+// message types carry only a 4-character Maidenhead locator. A 6-char
+// grid (e.g. "EM95PC") has no bits in those messages, so the packer
+// silently drops the grid and the message goes on air as a bare
+// "CQ W4PFI" (verified by an encode->decode round-trip). Send the 4-char
+// subsquare, which is exactly what WSJT-X transmits for these.
+export function gridField(grid) {
+  return grid ? String(grid).toUpperCase().slice(0, 4) : '';
+}
+
 export function defaultCqMessage(callsign, grid) {
   if (!callsign || !grid) return '';
-  return `CQ ${callsign.toUpperCase()} ${grid.toUpperCase()}`;
+  return `CQ ${callsign.toUpperCase()} ${gridField(grid)}`;
 }
 
 /**
@@ -272,7 +282,7 @@ export class Ft8QsoSequencer {
     this.qso = { partnerCall: parsed.cqCall, role: 'caller', step: 'awaiting-report', freqHz: decoded.freq };
     this._seeking = false;
     return this._suggestion(
-      `${parsed.cqCall} ${this.myCall} ${this.myGrid}`,
+      `${parsed.cqCall} ${this.myCall} ${gridField(this.myGrid)}`,
       decoded.freq,
       `Calling ${parsed.cqCall} — send this reply, then watch for their signal report.`
     );
