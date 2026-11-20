@@ -5631,8 +5631,13 @@ function startMeterPolling() {
     if (inFlight || !link.connected) return;
     inFlight = true;
     try {
-      const shown = shownMeter(meterMode, pttActive);
-      if (shown !== 'S' && !pttActive) {
+      // isTransmitting() = radioTransmitting (server: connect snapshot +
+      // 'transmitting' events, which cover server PTT, CW text and paddle
+      // keying) || pttActive (this browser's own PTT). SWR/ALC are only
+      // meaningful while on the air, for any of those reasons.
+      const txing = isTransmitting();
+      const shown = shownMeter(meterMode, txing);
+      if (shown !== 'S' && !txing) {
         setMeterShown(shown, { idle: true }); // SWR and ALC only read while transmitting
         return;
       }
@@ -5640,9 +5645,10 @@ function startMeterPolling() {
       const data = await link.request(request);
       // The mode or PTT may have changed while the radio answered: an SWR or
       // ALC reading that arrives after PTT is released is not shown.
-      const now = shownMeter(meterMode, pttActive);
-      if (shown === now && (shown === 'S' || pttActive)) showMeterReading(shown, data.value);
-      else setMeterShown(now, { idle: now !== 'S' && !pttActive });
+      const nowTx = isTransmitting();
+      const now = shownMeter(meterMode, nowTx);
+      if (shown === now && (shown === 'S' || nowTx)) showMeterReading(shown, data.value);
+      else setMeterShown(now, { idle: now !== 'S' && !nowTx });
     } catch {
       // transient — next poll will retry
     } finally {
