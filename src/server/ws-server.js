@@ -451,6 +451,12 @@ class ControlServer extends EventEmitter {
       // TX Adjust attenuation floor (dB, negative), from
       // DIGITAL_TX_GAIN_MIN_DB; the client sets its slider min from this.
       digitalTxGainMinDb,
+      // The current TX Adjust value (dB, 0 down to the floor), server-owned
+      // so every browser shares one gain for the single radio. 0 (unity)
+      // until a browser changes it; updated and broadcast in
+      // SET_DIGITAL_TX_GAIN, and sent in this snapshot so a connecting
+      // browser adopts it instead of pushing its own remembered value.
+      digitalTxGainDb: 0,
       // Whether the "HamNoise" button (beneath "RNN") is currently armed —
       // see REQUEST.SET_HAMNOISE_ENABLED / audio-bridge.js#setHamNoiseEnabled.
       // A plain boolean, not a level like RNN's — HamNoise has no wet-ratio
@@ -1518,13 +1524,24 @@ class ControlServer extends EventEmitter {
         }
         case REQUEST.SET_DIGITAL_TX_GAIN: {
           const minDb = this.state.digitalTxGainMinDb ?? -50;
-          if (typeof msg.db !== 'number' || msg.db < minDb || msg.db > 40) {
-            throw new Error(`"db" must be a number between ${minDb} and 40`);
+          // Attenuation-only: 0 dB (unity) down to the configured floor.
+          // Positive gain would multiply the generated audio and clip it
+          // (the audio setter clamps too), so reject it here rather than
+          // relying on the slider's max alone.
+          if (typeof msg.db !== 'number' || msg.db < minDb || msg.db > 0) {
+            throw new Error(`"db" must be a number between ${minDb} and 0`);
           }
-          // Handled by AudioBridge via an internal-only event (same
-          // pattern as 'rnnoise-level'); ControlServer has no
-          // audioBridge reference.
+          // One shared gain for the single radio: remember it (so the
+          // connect snapshot carries it) and broadcast it so every other
+          // browser's TX Adjust slider follows. Without this, each browser
+          // pushed its own remembered value on connect and a fresh
+          // connection could silently override another's setting.
+          this.state.digitalTxGainDb = msg.db;
+          // Applied by AudioBridge via an internal-only event (same
+          // pattern as 'rnnoise-level'); ControlServer has no audioBridge
+          // reference.
           this.emit('digital-tx-gain', msg.db);
+          this._broadcast(makeEvent(EVENT.DIGITAL_TX_GAIN, { db: msg.db }));
           ws.send(makeResult(id, { db: msg.db }));
           break;
         }

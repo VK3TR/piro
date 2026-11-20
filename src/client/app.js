@@ -980,6 +980,16 @@ link.addEventListener('rtty-reversed', (event) => {
 link.addEventListener('rnnoise-level', (event) => {
   setRnnoiseButtonLevel(event.detail.level);
 });
+// TX Adjust is one shared gain for the single radio (server-owned): when
+// any browser changes it the server broadcasts the new value, so every
+// other browser's slider and readout follow. Display only -- don't echo it
+// back to the server, which would loop. See REQUEST.SET_DIGITAL_TX_GAIN.
+link.addEventListener('digital-tx-gain', (event) => {
+  const db = event.detail && event.detail.db;
+  if (!Number.isFinite(db)) return;
+  digitalTxGainDb = db;
+  renderDigitalTxGain();
+});
 // Keeps the "HamNoise" button in sync when another connected client (or a
 // page reload of this one) changes it — same pattern as rnnoise-level
 // above. Also fires when AudioBridge itself forces HamNoise off because
@@ -1128,14 +1138,15 @@ link.addEventListener('connected', (event) => {
   if (Number.isFinite(data.digitalTxGainMinDb)) {
     digitalTxGainMinDb = data.digitalTxGainMinDb;
     digitalTxGainSlider.min = String(digitalTxGainMinDb);
-    if (digitalTxGainDb < digitalTxGainMinDb) {
-      digitalTxGainDb = digitalTxGainMinDb;
-      renderDigitalTxGain();
-    }
   }
-  // Push this browser's remembered digital-TX gain to the server (the
-  // generated FT8/WSPR/TTY audio is scaled server-side, see audio-bridge).
-  link.request('setDigitalTxGain', { db: digitalTxGainDb }).catch(() => {});
+  // Adopt the server-owned TX Adjust value (one shared gain for the single
+  // radio, broadcast to every browser) rather than pushing this browser's
+  // own remembered value -- doing that on each connect would silently
+  // override whatever another browser had already set on the shared radio.
+  // See EVENT.DIGITAL_TX_GAIN and REQUEST.SET_DIGITAL_TX_GAIN.
+  if (Number.isFinite(data.digitalTxGainDb)) digitalTxGainDb = data.digitalTxGainDb;
+  if (digitalTxGainDb < digitalTxGainMinDb) digitalTxGainDb = digitalTxGainMinDb;
+  renderDigitalTxGain();
   syncTxAdjustVisible();
   rxGainSlider.disabled = false;
   for (const btn of Object.values(freqStepButtonEls)) btn.disabled = false;
@@ -5576,12 +5587,15 @@ const digitalTxGainPop = document.getElementById('digital-tx-gain-pop');
 const digitalTxGainSlider = document.getElementById('digital-tx-gain-slider');
 const digitalTxGainReadout = document.getElementById('digital-tx-gain-readout');
 const digitalTxGainClose = document.getElementById('digital-tx-gain-close');
-// Show TX Adjust only in app/digital modes that generate TX audio
-// (FT8/FT4/WSPR/TTY/JS8/VARA/SSTV/EasyPal/FreeDV); hidden in plain voice/CW
-// where it does nothing. Driven from updateSsbChip(), which runs on every
-// app-mode transition (the SSB chip follows appModeActive() too).
+// Show TX Adjust in the modes whose generated TX audio the server scales:
+// the app/digital modes (FT8/FT4/WSPR/JS8/VARA/SSTV/EasyPal/FreeDV/JTTY/
+// Olivia/Hell), AND plain RTTY -- a hardware mode, so it sets none of the
+// app-mode flags, but TtyBridge still scales its AFSK audio. Hidden in
+// plain voice/CW where it does nothing. Re-run from updateSsbChip() on
+// every app-mode and radio-mode transition (updateModeButtons() calls it),
+// so entering or leaving RTTY updates it too.
 function syncTxAdjustVisible() {
-  digitalTxGainEl.hidden = !appModeActive();
+  digitalTxGainEl.hidden = !(appModeActive() || ttyMode() === 'RTTY');
   if (digitalTxGainEl.hidden) closeTxAdjustPop();
 }
 // TX Adjust is attenuation-only (0 down to a server-configured floor,
