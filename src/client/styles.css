@@ -500,6 +500,13 @@ button {
   display: none;
 }
 
+/* A typed 6-char grid was trimmed to 4 for the standard FT8 message
+   (see app.js sendFt8Message / ft8-qso.js trimMessageGrid): amber so the
+   operator notices the outgoing message differs from what they typed. */
+.ft8-status--warn {
+  color: var(--led-amber);
+}
+
 /* Guided-QSO progress line (see src/client/ft8-qso.js) — distinct from
    .ft8-status above, which reports TX scheduling/send lifecycle; this
    reports "what the guided sequence is doing/waiting for", which can be

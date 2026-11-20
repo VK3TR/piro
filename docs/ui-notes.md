@@ -5750,3 +5750,26 @@ also in v142.
   4.6 prints `0.5` where 4.5 printed `0.500000`. Passes here with Hamlib
   4.5.5; CI runs 4.6.5.
 - Service-worker cache v147.
+
+### FT8/FT4: send the 4-character grid in CQ and grid-report messages (v149)
+- **Real bug (found on air, 2026-11-19).** With a 6-character Maidenhead grid
+  configured (e.g. EM95PC), our own CQ went out as a bare "CQ <call>" -- the
+  grid was dropped on receive.
+- **Cause.** The standard FT8 "CQ CALL GRID" and "CALL CALL GRID" 77-bit
+  messages carry only a 4-character locator. Handed the full 6 characters the
+  @e04/ft8ts packer cannot fit them and falls back to the grid-less form,
+  dropping the locator entirely (shown with an encode -> decode round-trip; a
+  drop, not a truncation).
+- **Now.** A shared `gridField()` helper trims the grid to its 4-character
+  subsquare in `defaultCqMessage()` and the caller-role Tx2 reply, which is
+  what WSJT-X transmits for these message types. A 6-character grid typed into
+  the composer is trimmed at send time by `trimMessageGrid()`, but only in a
+  recognised standard CQ/reply between real callsigns -- free text such as
+  "MY QTH EM95PC" is left intact (a 6-character grid is legal there). The live
+  status line then shows the real outgoing message in amber with a "grid
+  trimmed to 4 chars (FT8 limit)" note. The full 6-character grid is still kept
+  for display and logging.
+- Tests: ft8-qso.test.mjs -- `gridField()`/`defaultCqMessage()` trimming, the
+  caller-role Tx2 reply, and `trimMessageGrid()` across CQ, reply, 4-char
+  no-op, reports/73, a grid-less CQ, and free text.
+- Service-worker cache v149.
