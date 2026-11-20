@@ -5699,6 +5699,19 @@ also in v142.
   gone when the radio answers.
 - Service-worker cache v146.
 
+### Wider desktop layout and draggable decode-table columns (v147)
+- On screens 900 px and wider the panels drop their 640 px max-width and use
+  almost the whole window (a CSS media query; no JavaScript, no user-agent
+  sniffing). Phones and narrow windows are unchanged.
+- The decode tables (FT8/FT4, JTTY, WSPR) get draggable column dividers on
+  those wide screens (src/client/table-resize.js): each column except the
+  last takes an explicit width, the Message column flexes to stay widest, and
+  a faint divider by each header brightens on hover and while dragging. Narrow
+  screens never get the `data-resizable` attribute, so the compact
+  fixed-column layout is untouched.
+- No real bug; both are enhancements.
+- Tests: no automated test for the drag UI (it needs a real browser); checked
+  by eye in a desktop browser. The responsive width is pure CSS.
 ### rigctl port: Hamlib 4.6 clients (v147)
 - **Real bug, found by CI.** GitHub's runners moved to Ubuntu 26.04, which
   installs Hamlib 4.6.5, and rigctl-server.test.js began failing on every
