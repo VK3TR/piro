@@ -16,12 +16,14 @@
  * Supported (short and \long names): f/F frequency, m/M mode and passband,
  * t/T PTT, v/V VFO (VFOA only), s/S split (off only), l/L levels (RFPOWER,
  * STRENGTH, RAWSTR, SWR, ALC; set RFPOWER), \get_powerstat, \chk_vfo,
- * \dump_state, _ (info), q (quit). Extended replies with a "+" prefix.
- * Anything else answers RPRT -11 (not available).
+ * \dump_state, \get_lock_mode and \set_lock_mode, _ (info), q (quit).
+ * Extended replies with a "+" prefix. Anything else answers RPRT -11 (not
+ * available).
  *
  * The answers follow rigctld from Hamlib 4.5.5, recorded against its dummy
- * radio. Hamlib's numbers (modes, levels, error codes) were read from its
- * own library.
+ * radio, and Hamlib 4.6.5's source (tests/rigctl_parse.c,
+ * rigs/dummy/netrigctl.c) for what its client expects. Hamlib's numbers
+ * (modes, levels, error codes) were read from its own library.
  */
 
 const net = require('net');
@@ -202,7 +204,11 @@ const COMMANDS = {
   q: 'quit',
   Q: 'quit',
 };
-const LONG_NAMES = new Set([...Object.values(COMMANDS), 'get_powerstat', 'chk_vfo', 'dump_state']);
+const LONG_NAMES = new Set([...Object.values(COMMANDS), 'get_powerstat', 'chk_vfo', 'dump_state', 'get_lock_mode', 'set_lock_mode']);
+// Reads that rigctld follows with "RPRT 0" in plain replies (they lack its
+// ARG_OUT flag). Hamlib 4.6's client waits for that second line after
+// \get_lock_mode, and goes out of step without it.
+const GETS_WITH_RPRT = new Set(['get_lock_mode']);
 
 /** An answer: value lines (with labels for "+" replies), then the status. */
 class Reply {
@@ -281,6 +287,7 @@ class Connection {
     this.who = who;
     this.client = server.controlServer.addExternalClient(`rigctl ${who}`);
     this.buffer = '';
+    this.lockMode = false; // \set_lock_mode, per connection
     this.chain = Promise.resolve();
     this.closed = false;
     socket.setEncoding('latin1');
@@ -422,6 +429,15 @@ class Connection {
         return this._setLevel(args[0], args[1]);
       case 'get_powerstat':
         return new Reply(RIG_OK, [['Power Status', '1']]);
+      case 'get_lock_mode':
+        // Hamlib 4.6's client asks before every mode change.
+        return new Reply(RIG_OK, [['Locked', this.lockMode ? '1' : '0']]);
+      case 'set_lock_mode': {
+        const lock = Number(args[0]);
+        if (args[0] === undefined || ![0, 1].includes(lock)) return fail(RIG_EINVAL);
+        this.lockMode = lock === 1; // as rigctld: mode changes are then ignored
+        return fail(RIG_OK);
+      }
       case 'chk_vfo':
         return new Reply(RIG_OK, [['CHKVFO', '0']]); // no VFO argument on commands
       case 'dump_state':
@@ -434,6 +450,7 @@ class Connection {
   }
 
   async _setMode([name, passband]) {
+    if (this.lockMode) return fail(RIG_OK); // locked (\set_lock_mode 1): ignored, as rigctld does
     const want = FROM_HAMLIB[name];
     if (!want) return fail(RIG_EINVAL);
     const width = passband === undefined ? 0 : Number(passband);
@@ -544,6 +561,7 @@ function format(name, args, reply, extended) {
   const isGet = !name.startsWith('set_');
   if (!extended) {
     if (reply.code) return `RPRT -${reply.code}\n`;
+    if (GETS_WITH_RPRT.has(name)) return reply.values.map(([, v]) => `${v}\n`).join('') + 'RPRT 0\n';
     if (!isGet) return `RPRT 0\n`;
     return reply.values.map(([, v]) => `${v}\n`).join('');
   }
