@@ -709,7 +709,8 @@ What it does:
   sees them.
 
 What it doesn't do: audio, VFO B and split, CW sending, and the other
-Hamlib commands (they answer "not available", `RPRT -11`). Up to four
+Hamlib commands (they answer "not available", `RPRT -11`). Tested with
+Hamlib 4.5.5's client here and 4.6.5's in CI. Up to four
 programs can be connected at once.
 
 **Audio for programs on the Pi.** PiRO keeps the radio's sound card open,
