@@ -5698,3 +5698,20 @@ also in v142.
   manual-tty-ui.js: the banner in both browsers, below the header, and
   gone when the radio answers.
 - Service-worker cache v146.
+
+### Read the SWR/ALC meters during server-driven transmits (v148)
+- **Real bug.** The transmit meters (SWR, ALC, power and the rest) only
+  updated while the on-screen PTT button was held. During a transmit the
+  server drives itself -- FT8/FT4, WSPR, CW text, the CW paddle -- the browser
+  did not poll them, so the meters sat still just when the operator wanted to
+  watch ALC.
+- **Cause.** The meter poll keyed off the local PTT-button state instead of
+  the "on the air for any reason" signal the server already broadcasts.
+- **Now.** The poll uses `isTransmitting()` = `radioTransmitting || pttActive`.
+  `radioTransmitting` follows the `transmitting` event and the connect
+  snapshot (PTT on, an unconfirmed PTT release, the CW paddle keying, CW text
+  going out), so the meters read during any transmit, however it was started.
+- Tests: the meter-mode and S-meter modules keep their unit tests
+  (meter-modes.test.mjs, smeter.test.mjs); the poll-timing change is client UI
+  wiring, checked by watching the meters during an FT8 and a paddle-CW transmit.
+- Service-worker cache v148.
