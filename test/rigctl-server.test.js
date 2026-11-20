@@ -132,6 +132,8 @@ async function run() {
     check((await c.cmd('+f', 3)) === 'get_freq:\nFrequency: 14074000\nRPRT 0\n', '+f: extended reply');
     check((await c.cmd('+m', 4)) === 'get_mode:\nMode: USB\nPassband: 3000\nRPRT 0\n', '+m: extended reply');
     check((await c.cmd('+l RFPOWER', 3)) === 'get_level: RFPOWER\n0.500000\nRPRT 0\n', '+l RFPOWER: extended reply, 50 W is 0.5');
+    check((await c.cmd('\\get_lock_mode', 2)) === '0\nRPRT 0\n', '\\get_lock_mode: 0 then RPRT 0, as rigctld sends it (Hamlib 4.6 waits for both lines)');
+    check((await c.cmd('+\\get_lock_mode', 3)) === 'get_lock_mode:\nLocked: 0\nRPRT 0\n', '+\\get_lock_mode: extended reply');
     check((await c.cmd('\\nonsense')) === 'RPRT -11\n', 'an unknown command: RPRT -11');
     check((await c.cmd('x')) === 'RPRT -11\n', 'a command not offered (x, split mode): RPRT -11');
     check((await c.cmd('F')) === 'RPRT -1\n', 'F with no frequency: RPRT -1');
@@ -161,6 +163,11 @@ async function run() {
     check((await c.cmd('L RFPOWER 0.25')) === 'RPRT 0\n' && radio.power === 25, 'L RFPOWER 0.25: 25 W');
     check((await c.cmd('L RFPOWER 2')) === 'RPRT -1\n' && radio.power === 25, 'L RFPOWER 2 (above 1): RPRT -1');
     check((await c.cmd('V VFOA')) === 'RPRT 0\n' && (await c.cmd('V VFOB')) === 'RPRT -11\n', 'V VFOA accepted; VFOB not offered');
+    // \set_lock_mode 1: mode changes are ignored (answered RPRT 0), as rigctld does.
+    radio.log = [];
+    check((await c.cmd('\\set_lock_mode 1')) === 'RPRT 0\n' && (await c.cmd('\\get_lock_mode', 2)) === '1\nRPRT 0\n', '\\set_lock_mode 1: locked');
+    check((await c.cmd('M CW 0')) === 'RPRT 0\n' && radio.mode === 'USB' && radio.log.length === 0, 'locked: M CW is answered RPRT 0 but changes nothing');
+    check((await c.cmd('\\set_lock_mode 0')) === 'RPRT 0\n' && (await c.cmd('\\set_lock_mode 2')) === 'RPRT -1\n', '\\set_lock_mode 0 unlocks; 2 is refused');
     check((await c.cmd('S 0 VFOA')) === 'RPRT 0\n' && (await c.cmd('S 1 VFOB')) === 'RPRT -11\n', 'S 0 accepted; split on not offered');
 
     // PTT is off unless allowed; unkeying always works.
@@ -295,7 +302,9 @@ async function run() {
       });
     let r = await rigctl('f', 'm', 'v', 's', 't', 'l', 'RFPOWER', 'l', 'STRENGTH');
     console.log = quiet.log;
-    check(!r.err && r.out === '14074000\nUSB\n3000\nVFOA\n0\nVFOA\n0\n0.500000\n0\n', `rigctl -m 2 opens it and reads frequency, mode, VFO, split, PTT and levels (${JSON.stringify(r.out)})`);
+    // The level lines are compared as numbers: Hamlib 4.5 prints 0.500000, 4.6 prints 0.5.
+    const lines = r.out.split('\n');
+    check(!r.err && lines.slice(0, 7).join('\n') === '14074000\nUSB\n3000\nVFOA\n0\nVFOA\n0' && Number(lines[7]) === 0.5 && Number(lines[8]) === 0, `rigctl -m 2 opens it and reads frequency, mode, VFO, split, PTT and levels (${JSON.stringify(r.out)})`);
     console.log = () => {};
     r = await rigctl('F', '3573000', 'M', 'PKTUSB', '0', 'T', '1', 't', 'T', '0', 't');
     // Hamlib's client answers a read straight after its own set from its

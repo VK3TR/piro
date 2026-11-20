@@ -5715,3 +5715,38 @@ also in v142.
   (meter-modes.test.mjs, smeter.test.mjs); the poll-timing change is client UI
   wiring, checked by watching the meters during an FT8 and a paddle-CW transmit.
 - Service-worker cache v148.
+### Wider desktop layout and draggable decode-table columns (v147)
+- On screens 900 px and wider the panels drop their 640 px max-width and use
+  almost the whole window (a CSS media query; no JavaScript, no user-agent
+  sniffing). Phones and narrow windows are unchanged.
+- The decode tables (FT8/FT4, JTTY, WSPR) get draggable column dividers on
+  those wide screens (src/client/table-resize.js): each column except the
+  last takes an explicit width, the Message column flexes to stay widest, and
+  a faint divider by each header brightens on hover and while dragging. Narrow
+  screens never get the `data-resizable` attribute, so the compact
+  fixed-column layout is untouched.
+- No real bug; both are enhancements.
+- Tests: no automated test for the drag UI (it needs a real browser); checked
+  by eye in a desktop browser. The responsive width is pure CSS.
+### rigctl port: Hamlib 4.6 clients (v147)
+- **Real bug, found by CI.** GitHub's runners moved to Ubuntu 26.04, which
+  installs Hamlib 4.6.5, and rigctl-server.test.js began failing on every
+  pull request: Hamlib's own client could read the radio but not set the
+  mode, and stopped there. Cause: before a mode change, Hamlib 4.6's
+  client asks `\get_lock_mode` and reads two lines, the value and then
+  "RPRT 0" (rigctld sends both: the command lacks its ARG_OUT flag). PiRO
+  answered `RPRT -11`, one line, so the client read an undefined lock
+  state and then waited for a line that never came, out of step with
+  everything after it. Hamlib 4.5.5's client happened to cope. Found by
+  reading Hamlib 4.6.5's source (rigs/dummy/netrigctl.c,
+  tests/rigctl_parse.c); 4.5.5's rigctld, run here, sends the same two
+  lines.
+- **Fix.** `\get_lock_mode` answers as rigctld does: `0` (or `1`), then
+  `RPRT 0`. `\set_lock_mode 0|1` is accepted per connection; while locked,
+  mode changes are answered `RPRT 0` and ignored, as rigctld does.
+- **Tests.** rigctl-server.test.js: the two-line reply, the extended
+  reply, locking ignoring `M`, unlocking, a bad value refused. The checks
+  with Hamlib's own client compare the level readings as numbers, since
+  4.6 prints `0.5` where 4.5 printed `0.500000`. Passes here with Hamlib
+  4.5.5; CI runs 4.6.5.
+- Service-worker cache v147.
