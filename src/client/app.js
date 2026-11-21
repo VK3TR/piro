@@ -1785,6 +1785,7 @@ function updateSsbChip() {
     sstvModeBtn.textContent = sstvActive ? 'SSTV' : easypalActive ? 'EasyPal' : faxActive ? 'Fax' : 'Image';
   }
   syncTxAdjustVisible();
+  syncMicGainVisible();
 }
 
 function updateModeButtons(mode) {
@@ -5671,7 +5672,11 @@ digitalTxGainSlider.addEventListener('change', () => {
 // Visible exactly when the PTT button is: the several places that show or
 // hide the PTT button and its section don't each need to know about it.
 function syncMicGainVisible() {
-  micGainEl.hidden = pttBtn.hidden || pttSectionEl.hidden;
+  // SSTV transmits server-generated tones in DATA MODE, which bypasses the
+  // mic entirely (see sstv-tx-bridge.js) -- the mic-gain control does nothing
+  // there, so hide it. TX Adjust is the drive control for SSTV. Re-run from
+  // updateSsbChip() so it tracks the SSTV mode toggle.
+  micGainEl.hidden = pttBtn.hidden || pttSectionEl.hidden || sstvActive;
 }
 const micGainObserver = new MutationObserver(syncMicGainVisible);
 micGainObserver.observe(pttBtn, { attributes: true, attributeFilter: ['hidden'] });
