@@ -5835,3 +5835,29 @@ dB, 0 dB is unity passthrough, and positive gain is clamped; plus the
 updated mode-bridge stubs. Server range-validation lives in ws-server.js;
 the client restore-on-reject is UI wiring, checked by pausing PiRO for a
 second LAN client. Service-worker cache v152.
+
+### Hear each other transmit: TX echo to the other browsers (v153)
+- **New (requested).** People sharing the radio couldn't hear each other
+  transmit: the radio's own audio is silent while it transmits, and a
+  browser's mic went only to the radio. That made a group net hard.
+- **Now.** In a voice mode, each packet of a browser's mic audio is also
+  sent to every other browser, in each one's own format (raw PCM, Opus or
+  ADPCM), as if it were received audio (AudioBridge#_echoTx). The talker
+  isn't sent its own voice. Voice modes: LSB, USB, AM or FM with DATA
+  mode off and no data app mode on (FT8, JTTY, Olivia, JS8, Feld-Hell,
+  VARA, SSTV, WSPR, fax, EasyPal), or FreeDV (the echo is the speech,
+  before RADE encodes it).
+- While the echo flows, and for 300 ms after the last mic packet, the
+  radio's received audio (silence while transmitting) isn't sent: the two
+  would interleave and pile up in the browsers' players. It still reaches
+  the server's own listeners.
+- `TX_AUDIO_ECHO`, on by default; `off` (or 0, false, no) turns it off.
+- Tests: tx-echo.test.js (new): the other browsers get the talker's audio
+  byte for byte and the talker doesn't; received audio held back, then
+  flowing again after the hold; LSB, AM, FM and FreeDV echo, USB-D, CW,
+  RTTY, FT8, SSTV and VARA don't; off with the setting; Opus and ADPCM
+  browsers get their own formats; two talkers each hear the other; end to
+  end with a real ControlServer and two WebSocket clients. The existing
+  audio, squelch, FreeDV and mic tests pass unchanged.
+- Not tested with real phones on a net, and not tested on air.
+- Service-worker cache v153.
