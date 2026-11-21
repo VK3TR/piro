@@ -588,6 +588,14 @@ From the top:
   audio is made on the Pi. Above about 80% of full scale, peaks are
   rounded off rather than clipped hard. Watch the **ALC** meter while you
   talk to set it. Not tested on air.
+- **TX Adjust**: software drive for the digital and data modes (FT8/FT4,
+  WSPR, JS8, RTTY, SSTV, FreeDV and the rest) — the counterpart to
+  **Mic** for the audio PiRO generates on the Pi, so it shows only in those
+  modes. A compact dB value; tap it for a slider. Attenuation only, 0 dB
+  down to a floor (`DIGITAL_TX_GAIN_MIN_DB`, −50 dB by default): like
+  WSJT-X's Pwr slider, set it while watching the **ALC** meter. Unlike
+  **Mic**, it is one shared setting for the radio, so every browser sees the
+  same value.
 - **Power**: 100, 75, 50, 25 or 5 W (1 to 5 W in WSPR).
 - **Spectrum scope and waterfall**, if `CIV_SCOPE_ENABLED=true` and your
   radio sends scope data. It stays centred on your frequency. **Scope
@@ -2744,7 +2752,11 @@ browser may be at most 8 MiB (the largest real one, an EasyPal picture,
 is under 6 MB); a bigger one closes that browser's connection (code 1009).
 `setFrequency` takes a frequency in Hz from 1 to 9,999,999,999 (CI-V's 10
 digits), rounded to whole Hz; whether the radio covers it is up to the
-radio. `cwKey` (`{session, t, d}`) is one CW paddle element: the server
+radio. `setDigitalTxGain` (`{db}`) sets the software drive on PiRO’s
+generated digital audio; it is validated to the attenuation range (0 dB down
+to `DIGITAL_TX_GAIN_MIN_DB`), kept as one shared value for the radio,
+broadcast as `digital-tx-gain`, and included in the `connected` snapshot as
+`digitalTxGainDb`. `cwKey` (`{session, t, d}`) is one CW paddle element: the server
 holds it `CW_PADDLE_DELAY_MS` and keys it on its own clock; `cw-keying`
 (`{active}`) is broadcast when the paddle starts and stops keying.
 `transmitting` (`{active}`, also in the `connected` snapshot) is broadcast

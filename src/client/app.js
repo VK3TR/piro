@@ -5596,9 +5596,11 @@ micGainSelect.addEventListener('change', () => {
 
 // --- Digital TX gain (FT8/FT4/WSPR/TTY/...) ---
 // A software drive control for the server-generated transmit audio, styled
-// and optioned like Mic gain. Remembered per browser; pushed to the server,
-// which scales the generated PCM (see audio-bridge.js#writeGenerated). The
-// digital-mode equivalent of WSJT-X's Pwr slider: set it while watching ALC.
+// and optioned like Mic gain. Server-owned: one shared value for the single
+// radio, not per browser. The server scales the generated PCM (see
+// audio-bridge.js#writeGenerated), broadcasts changes to every client, and
+// sends the current value in the connect snapshot. The digital-mode
+// equivalent of WSJT-X's Pwr slider: set it while watching ALC.
 // Does not affect voice/mic TX.
 const digitalTxGainEl = document.getElementById('digital-tx-gain');
 const digitalTxGainBtn = document.getElementById('digital-tx-gain-btn');
