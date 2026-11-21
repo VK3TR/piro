@@ -3,7 +3,8 @@ import { CallAlert, baseCall } from './call-alert.js';
 import { AudioPipeline, opusSupport, isLanHost } from './audio.js';
 import { ScopeDisplay } from './scope.js';
 import { METER_MODES, METER_TITLES, METER_SEGMENTS, nextMeterMode, shownMeter, meterLegend, meterReading } from './meter-modes.js';
-import { Ft8QsoSequencer, isRelatedToQso, defaultCqMessage } from './ft8-qso.js';
+import { Ft8QsoSequencer, isRelatedToQso, defaultCqMessage, trimMessageGrid } from './ft8-qso.js';
+import { initColumnResize } from './table-resize.js';
 
 // --- Service worker: only register in a secure context (https:, or
 // http://localhost). See docs/pwa-notes.md for why plain http on a LAN
@@ -618,6 +619,7 @@ let hasRequestedDefaultSpan = false; // auto-request the default span exactly on
 let ft8Active = false;
 let ft8LastBandName = null; // which band FT8's auto-tune last targeted, to detect a *new* band change rather than re-tuning on every frequency update
 let ft8SendInFlight = false;
+let ft8TrimmedTx = null; // exact outgoing text whose grid we trimmed on the last local send (for the status-line flag)
 // Chimes when an FT8/FT4 station calls us (see call-alert.js).
 const callAlert = new CallAlert();
 /** A decoded message addressed to this station. */
@@ -5105,6 +5107,14 @@ link.addEventListener('ft8-tx-status', (event) => {
   ft8StatusEl.hidden = false;
   ft8SendInFlight = status === 'scheduled' || status === 'sending';
   ft8SendBtn.disabled = ft8SendInFlight;
+  // Flag a grid that was trimmed to 4 chars for this send (see
+  // sendFt8Message) on the live status line, so the operator sees the
+  // real outgoing message rather than their 6-char input. Matched on the
+  // exact message text (TX status is broadcast to every browser) so the
+  // note can't attach to a different browser's later, untrimmed send.
+  const gridTrimNote = ft8TrimmedTx != null && message === ft8TrimmedTx
+    && (status === 'scheduled' || status === 'sending' || status === 'sent');
+  ft8StatusEl.classList.toggle('ft8-status--warn', gridTrimNote);
   switch (status) {
     case 'scheduled':
       ft8StatusEl.textContent = `Scheduled: "${message}" — sending at ${sendAtMs != null ? formatUtcTime(sendAtMs) : 'next slot'}Z`;
@@ -5121,11 +5131,20 @@ link.addEventListener('ft8-tx-status', (event) => {
     default:
       ft8StatusEl.hidden = true;
   }
+  if (gridTrimNote) ft8StatusEl.textContent += ' \u2014 grid trimmed to 4 chars (FT8 limit)';
 });
 
 function sendFt8Message() {
-  const text = ft8ComposerInput.value.trim().toUpperCase();
-  if (!text) return;
+  const typed = ft8ComposerInput.value.trim().toUpperCase();
+  if (!typed) return;
+  // A standard FT8 message carries only a 4-char grid; trim a typed
+  // 6-char locator (e.g. EM95PC) to its subsquare so the encoder doesn't
+  // drop the grid and transmit a bare "CQ CALL". The typed text is left
+  // in the composer; the trim is flagged on the status line below. This
+  // also lets a typed default CQ still match defaultCqMessage() and arm
+  // the guided sequence.
+  const text = trimMessageGrid(typed);
+  ft8TrimmedTx = text !== typed ? text : null;
 
   // Sending our own default CQ arms the guided sequence to watch for a
   // reply (see ft8-qso.js's noteOwnCqSent() doc comment for why this
@@ -5757,8 +5776,13 @@ function startMeterPolling() {
     if (inFlight || !link.connected) return;
     inFlight = true;
     try {
-      const shown = shownMeter(meterMode, pttActive);
-      if (shown !== 'S' && !pttActive) {
+      // isTransmitting() = radioTransmitting (server: connect snapshot +
+      // 'transmitting' events, which cover server PTT, CW text and paddle
+      // keying) || pttActive (this browser's own PTT). SWR/ALC are only
+      // meaningful while on the air, for any of those reasons.
+      const txing = isTransmitting();
+      const shown = shownMeter(meterMode, txing);
+      if (shown !== 'S' && !txing) {
         setMeterShown(shown, { idle: true }); // SWR and ALC only read while transmitting
         return;
       }
@@ -5766,9 +5790,10 @@ function startMeterPolling() {
       const data = await link.request(request);
       // The mode or PTT may have changed while the radio answered: an SWR or
       // ALC reading that arrives after PTT is released is not shown.
-      const now = shownMeter(meterMode, pttActive);
-      if (shown === now && (shown === 'S' || pttActive)) showMeterReading(shown, data.value);
-      else setMeterShown(now, { idle: now !== 'S' && !pttActive });
+      const nowTx = isTransmitting();
+      const now = shownMeter(meterMode, nowTx);
+      if (shown === now && (shown === 'S' || nowTx)) showMeterReading(shown, data.value);
+      else setMeterShown(now, { idle: now !== 'S' && !nowTx });
     } catch {
       // transient — next poll will retry
     } finally {
@@ -6769,4 +6794,13 @@ for (const [el, resync] of [
     },
     true
   );
+}
+
+
+// Draggable decode-table columns (desktop/wide view only; see
+// table-resize.js). Kept last so the whole UI is wired up first.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initColumnResize);
+} else {
+  initColumnResize();
 }

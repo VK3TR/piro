@@ -14,7 +14,7 @@ Hamlib, no separate audio server and no extra apps.
 Written by VK3TR. Licensed AGPL-3.0-only (see
 [Licence](#licence)).
 
-**Current build: v147.** This is the version the app shows next to its title.
+**Current build: v151.** This is the version the app shows next to its title.
 It is the `CACHE_NAME` number in `src/client/sw.js`, which goes up with every
 change to the web app.
 
@@ -709,7 +709,8 @@ What it does:
   sees them.
 
 What it doesn't do: audio, VFO B and split, CW sending, and the other
-Hamlib commands (they answer "not available", `RPRT -11`). Up to four
+Hamlib commands (they answer "not available", `RPRT -11`). Tested with
+Hamlib 4.5.5's client here and 4.6.5's in CI. Up to four
 programs can be connected at once.
 
 **Audio for programs on the Pi.** PiRO keeps the radio's sound card open,

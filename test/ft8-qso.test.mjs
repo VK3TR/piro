@@ -28,10 +28,11 @@ fs.copyFileSync(sourcePath, tmpPath);
 let parseFt8Message;
 let formatReport;
 let defaultCqMessage;
+let trimMessageGrid;
 let isRelatedToQso;
 let Ft8QsoSequencer;
 try {
-  ({ parseFt8Message, formatReport, defaultCqMessage, isRelatedToQso, Ft8QsoSequencer } = await import(
+  ({ parseFt8Message, formatReport, defaultCqMessage, isRelatedToQso, Ft8QsoSequencer, trimMessageGrid } = await import(
     `file://${tmpPath}`
   ));
 } finally {
@@ -120,10 +121,33 @@ check(formatReport(NaN) === '+00', 'formatReport(NaN) falls back to a sane defau
 // --- defaultCqMessage() ---
 
 check(defaultCqMessage('VK2IO', 'QF56') === 'CQ VK2IO QF56', 'defaultCqMessage builds "CQ CALLSIGN GRID"');
-check(defaultCqMessage('vk2io', 'qf56mc') === 'CQ VK2IO QF56MC', 'defaultCqMessage uppercases both callsign and grid');
+check(defaultCqMessage('vk2io', 'qf56') === 'CQ VK2IO QF56', 'defaultCqMessage uppercases both callsign and grid');
+// The standard FT8 "CQ CALL GRID" message has bits for only a 4-character
+// locator, so a configured 6-character grid is trimmed to its subsquare
+// (as WSJT-X does). Feeding the full 6 chars to the encoder makes the
+// packer drop the grid entirely and transmit a bare "CQ CALL".
+check(defaultCqMessage('VK2IO', 'QF56MC') === 'CQ VK2IO QF56', 'defaultCqMessage trims a 6-character grid to 4 for the standard CQ message');
 check(defaultCqMessage(null, 'QF56') === '', 'defaultCqMessage returns empty string when the callsign is missing');
 check(defaultCqMessage('VK2IO', null) === '', 'defaultCqMessage returns empty string when the grid is missing');
 check(defaultCqMessage(null, null) === '', 'defaultCqMessage returns empty string when neither is configured');
+
+// --- trimMessageGrid() (composer free text at send time) ---
+check(trimMessageGrid('CQ W4PFI EM95PC') === 'CQ W4PFI EM95', 'trims a typed 6-char grid in a CQ to its 4-char subsquare');
+check(trimMessageGrid('VK3XU VK2IO QF56MC') === 'VK3XU VK2IO QF56', 'trims a typed 6-char grid in a reply to 4');
+check(trimMessageGrid('CQ W4PFI EM95') === 'CQ W4PFI EM95', 'leaves a 4-char grid untouched');
+check(trimMessageGrid('VK3XU VK2IO R-11') === 'VK3XU VK2IO R-11', 'leaves an acknowledged report untouched');
+check(trimMessageGrid('VK3XU VK2IO 73') === 'VK3XU VK2IO 73', 'leaves 73 untouched');
+check(trimMessageGrid('CQ W4PFI') === 'CQ W4PFI', 'leaves a grid-less CQ untouched');
+check(trimMessageGrid('MY QTH EM95PC') === 'MY QTH EM95PC', 'leaves free text (non-callsign tokens) untouched — a 6-char grid is valid in free text');
+check(trimMessageGrid('CQ DX VK2IO QF56MC') === 'CQ DX VK2IO QF56', 'trims a 6-char grid in a "CQ <qualifier> CALL GRID"');
+
+// A 6-character configured grid is likewise trimmed in the caller-role
+// Tx2 reply (us -> CQer, carrying our grid).
+{
+  const seq = new Ft8QsoSequencer({ myCall: 'VK2IO', myGrid: 'QF56MC' });
+  const step = seq.engage({ msg: 'CQ VK3XU QF33', freq: 1500, snr: -10 });
+  check(step !== null && step.txText === 'VK3XU VK2IO QF56', `caller-role Tx2 trims our 6-char grid to 4, got ${JSON.stringify(step)}`);
+}
 
 // --- isRelatedToQso() ---
 

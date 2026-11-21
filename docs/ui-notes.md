@@ -5699,7 +5699,81 @@ also in v142.
   gone when the radio answers.
 - Service-worker cache v146.
 
-### TX Adjust: mic-gain hidden in SSTV (v147)
+### Read the SWR/ALC meters during server-driven transmits (v148)
+- **Real bug.** The transmit meters (SWR, ALC, power and the rest) only
+  updated while the on-screen PTT button was held. During a transmit the
+  server drives itself -- FT8/FT4, WSPR, CW text, the CW paddle -- the browser
+  did not poll them, so the meters sat still just when the operator wanted to
+  watch ALC.
+- **Cause.** The meter poll keyed off the local PTT-button state instead of
+  the "on the air for any reason" signal the server already broadcasts.
+- **Now.** The poll uses `isTransmitting()` = `radioTransmitting || pttActive`.
+  `radioTransmitting` follows the `transmitting` event and the connect
+  snapshot (PTT on, an unconfirmed PTT release, the CW paddle keying, CW text
+  going out), so the meters read during any transmit, however it was started.
+- Tests: the meter-mode and S-meter modules keep their unit tests
+  (meter-modes.test.mjs, smeter.test.mjs); the poll-timing change is client UI
+  wiring, checked by watching the meters during an FT8 and a paddle-CW transmit.
+- Service-worker cache v148.
+### Wider desktop layout and draggable decode-table columns (v147)
+- On screens 900 px and wider the panels drop their 640 px max-width and use
+  almost the whole window (a CSS media query; no JavaScript, no user-agent
+  sniffing). Phones and narrow windows are unchanged.
+- The decode tables (FT8/FT4, JTTY, WSPR) get draggable column dividers on
+  those wide screens (src/client/table-resize.js): each column except the
+  last takes an explicit width, the Message column flexes to stay widest, and
+  a faint divider by each header brightens on hover and while dragging. Narrow
+  screens never get the `data-resizable` attribute, so the compact
+  fixed-column layout is untouched.
+- No real bug; both are enhancements.
+- Tests: no automated test for the drag UI (it needs a real browser); checked
+  by eye in a desktop browser. The responsive width is pure CSS.
+### rigctl port: Hamlib 4.6 clients (v147)
+- **Real bug, found by CI.** GitHub's runners moved to Ubuntu 26.04, which
+  installs Hamlib 4.6.5, and rigctl-server.test.js began failing on every
+  pull request: Hamlib's own client could read the radio but not set the
+  mode, and stopped there. Cause: before a mode change, Hamlib 4.6's
+  client asks `\get_lock_mode` and reads two lines, the value and then
+  "RPRT 0" (rigctld sends both: the command lacks its ARG_OUT flag). PiRO
+  answered `RPRT -11`, one line, so the client read an undefined lock
+  state and then waited for a line that never came, out of step with
+  everything after it. Hamlib 4.5.5's client happened to cope. Found by
+  reading Hamlib 4.6.5's source (rigs/dummy/netrigctl.c,
+  tests/rigctl_parse.c); 4.5.5's rigctld, run here, sends the same two
+  lines.
+- **Fix.** `\get_lock_mode` answers as rigctld does: `0` (or `1`), then
+  `RPRT 0`. `\set_lock_mode 0|1` is accepted per connection; while locked,
+  mode changes are answered `RPRT 0` and ignored, as rigctld does.
+- **Tests.** rigctl-server.test.js: the two-line reply, the extended
+  reply, locking ignoring `M`, unlocking, a bad value refused. The checks
+  with Hamlib's own client compare the level readings as numbers, since
+  4.6 prints `0.5` where 4.5 printed `0.500000`. Passes here with Hamlib
+  4.5.5; CI runs 4.6.5.
+- Service-worker cache v147.
+
+### FT8/FT4: send the 4-character grid in CQ and grid-report messages (v149)
+- **Real bug (found on air, 2026-11-19).** With a 6-character Maidenhead grid
+  configured (e.g. EM95PC), our own CQ went out as a bare "CQ <call>" -- the
+  grid was dropped on receive.
+- **Cause.** The standard FT8 "CQ CALL GRID" and "CALL CALL GRID" 77-bit
+  messages carry only a 4-character locator. Handed the full 6 characters the
+  @e04/ft8ts packer cannot fit them and falls back to the grid-less form,
+  dropping the locator entirely (shown with an encode -> decode round-trip; a
+  drop, not a truncation).
+- **Now.** A shared `gridField()` helper trims the grid to its 4-character
+  subsquare in `defaultCqMessage()` and the caller-role Tx2 reply, which is
+  what WSJT-X transmits for these message types. A 6-character grid typed into
+  the composer is trimmed at send time by `trimMessageGrid()`, but only in a
+  recognised standard CQ/reply between real callsigns -- free text such as
+  "MY QTH EM95PC" is left intact (a 6-character grid is legal there). The live
+  status line then shows the real outgoing message in amber with a "grid
+  trimmed to 4 chars (FT8 limit)" note. The full 6-character grid is still kept
+  for display and logging.
+- Tests: ft8-qso.test.mjs -- `gridField()`/`defaultCqMessage()` trimming, the
+  caller-role Tx2 reply, and `trimMessageGrid()` across CQ, reply, 4-char
+  no-op, reports/73, a grid-less CQ, and free text.
+- Service-worker cache v149.
+### TX Adjust: mic-gain hidden in SSTV (v151)
 
 Follow-up to the TX Adjust work. SSTV transmits server-generated tones
 with the radio forced into DATA MODE, so the browser microphone is never
@@ -5713,4 +5787,4 @@ mic-gain sets the voice level feeding the RADE encoder, and TX Adjust
 sets the drive of the encoded modem waveform (the audio the radio and its
 ALC actually see).
 
-- Client only: app.js. Service-worker cache v147.
+- Client only: app.js. Service-worker cache v151.
