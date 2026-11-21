@@ -1569,7 +1569,8 @@ class Civ extends EventEmitter {
   {
     const http = require('http');
     const net = require('net');
-    const proxyServer = new ControlServer({ civ: new Civ(), port: 0, staticDir: PKG + '/src/client' });
+    // PiRO with LOGIN_PROXY on: it needs the signed-in user the proxy adds.
+    const proxyServer = new ControlServer({ civ: new Civ(), port: 0, staticDir: PKG + '/src/client', requireLogin: true });
     const piroPort = await proxyServer.listen();
     let expired = false;
     const tunnels = new Set();
@@ -1582,7 +1583,7 @@ class Civ extends EventEmitter {
         res.writeHead(302, { location: '/oauth2/sign_in?rd=' + encodeURIComponent(req.url) });
         return res.end();
       }
-      const up = http.request({ host: '127.0.0.1', port: piroPort, path: req.url, method: req.method, headers: req.headers }, (r) => {
+      const up = http.request({ host: '127.0.0.1', port: piroPort, path: req.url, method: req.method, headers: { ...req.headers, 'x-forwarded-user': 'vk3abc' } }, (r) => {
         res.writeHead(r.statusCode, r.headers);
         r.pipe(res);
       });
@@ -1591,7 +1592,8 @@ class Civ extends EventEmitter {
     proxy.on('upgrade', (req, socket, head) => {
       if (expired) return socket.end('HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\n\r\n');
       const up = net.connect(piroPort, '127.0.0.1', () => {
-        up.write(`${req.method} ${req.url} HTTP/1.1\r\n` + Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n');
+        const headers = { ...req.headers, 'x-forwarded-user': 'vk3abc' };
+        up.write(`${req.method} ${req.url} HTTP/1.1\r\n` + Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n');
         up.write(head);
         up.pipe(socket);
         socket.pipe(up);
@@ -1602,6 +1604,10 @@ class Civ extends EventEmitter {
     });
     await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
     const proxyPort = proxy.address().port;
+    const direct = await browser.newPage();
+    const directRes = await direct.goto(`http://localhost:${piroPort}/`);
+    check(directRes.status() === 401, `login proxy: PiRO's own port refuses a browser that didn't log in (${directRes.status()})`);
+    await direct.close();
     const pageP = await browser.newPage({ viewport: { width: 430, height: 1100 } });
     pageP.on('pageerror', (e) => errors.push('proxy: ' + e.message));
     await pageP.goto(`http://localhost:${proxyPort}/`);
@@ -1614,6 +1620,7 @@ class Civ extends EventEmitter {
       await pageP.waitForFunction(() => document.getElementById('led-text').textContent === 'Connected', null, { timeout: 8000 });
     }
     check(await pageP.evaluate(() => navigator.serviceWorker?.controller != null), 'login proxy: the service worker controls the page');
+    check([...proxyServer.clients].some((ws) => ws.loginUser === 'vk3abc'), 'login proxy: PiRO knows who is connected');
     expired = true;
     for (const s of tunnels) s.destroy();
     await pageP.waitForURL(/\/oauth2\/sign_in/, { timeout: 20000 }).then(

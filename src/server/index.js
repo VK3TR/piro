@@ -12,6 +12,7 @@ const { CwDecoderBridge } = require('./cw-decoder-bridge');
 const { RigctlServer } = require('./rigctl-server');
 const { IcomLanServer } = require('./icom-lan-server');
 const { watchRadio } = require('./radio-watch');
+const { loginConfigErrors } = require('./login-proxy');
 const { RttyDecoderBridge } = require('./rtty-decoder-bridge');
 const { JttyDecoderBridge } = require('./jtty-decoder-bridge');
 const { OliviaDecoderBridge } = require('./olivia-decoder-bridge');
@@ -361,17 +362,33 @@ const TLS_KEY_PATH = process.env.TLS_KEY_PATH;
 // here, comma-separated, e.g. "https://radio.example.net".
 const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
-// The address the web server listens on. Unset: every address the Pi has.
-// Behind a login proxy on the same Pi (e.g. oauth2-proxy), set 127.0.0.1 so
-// the app can only be reached through the proxy.
-const WS_HOST = (process.env.WS_HOST || '').trim() || null;
+// Login through a proxy on this Pi, such as oauth2-proxy (login-proxy.js).
+// Off unless LOGIN_PROXY is on/true/yes/1: PiRO works with no login. When
+// on, the login is mandatory: PiRO listens on loopback only and refuses any
+// request without a signed-in user from the proxy.
+const LOGIN_PROXY = /^(1|true|on|yes)$/i.test((process.env.LOGIN_PROXY || '').trim());
 
-// Idle logout, for use behind a login proxy: after this many minutes with
-// no tap, click or key in a browser, it closes its connection and goes to
-// IDLE_LOGOUT_URL (the proxy's sign-out). Off unless set; 1 to 1440.
+// The address the web server listens on. Unset: every address the Pi has,
+// or 127.0.0.1 with LOGIN_PROXY on (which allows nothing else).
+const WS_HOST = (process.env.WS_HOST || '').trim() || (LOGIN_PROXY ? '127.0.0.1' : null);
+
+// Idle logout, with LOGIN_PROXY only: after this many minutes with no tap,
+// click or key in a browser, it closes its connection and goes to
+// IDLE_LOGOUT_URL (the proxy's sign-out). 60 unless set; 1 to 1440, or
+// 0/off for none.
 const IDLE_LOGOUT_MINUTES = (() => {
-  const n = parseInt(process.env.IDLE_LOGOUT_MINUTES || '', 10);
-  if (!Number.isFinite(n) || n <= 0) return 0;
+  const raw = (process.env.IDLE_LOGOUT_MINUTES || '').trim();
+  if (!LOGIN_PROXY) {
+    if (raw && !/^(0|off)$/i.test(raw)) console.warn('IDLE_LOGOUT_MINUTES ignored: it needs LOGIN_PROXY on.');
+    return 0;
+  }
+  if (!raw) return 60;
+  if (/^off$/i.test(raw)) return 0;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) {
+    console.warn(`IDLE_LOGOUT_MINUTES="${raw}" is not a number of minutes; using 60.`);
+    return 60;
+  }
   return Math.min(1440, n);
 })();
 const IDLE_LOGOUT_URL = (() => {
@@ -450,6 +467,10 @@ async function maximizeUsbAudioLevelsOnRadio(civ) {
 
 async function main() {
   if (!['usb', 'lan'].includes(CIV_CONNECTION)) throw new Error('CIV_CONNECTION must be usb or lan');
+  // With LOGIN_PROXY on, a setting that leaves a way round the login stops
+  // PiRO here, before it touches the radio or opens a port.
+  const loginErrors = loginConfigErrors({ loginProxy: LOGIN_PROXY, wsHost: WS_HOST, rigctlPort: RIGCTL_PORT, rigctlHost: RIGCTL_HOST });
+  if (loginErrors.length) throw new Error(`Login settings: ${loginErrors.join(' ')}`);
   const lan = CIV_CONNECTION === 'lan';
   const radioAddr = RADIO_MODEL ? KNOWN_RADIO_ADDR[RADIO_MODEL] : undefined;
   civ = lan ? createLanRadio() : new CivDriver({ path: SERIAL_PATH, radioAddr, baudRate: CIV_BAUD_RATE, keyLine: CW_KEY_LINE || undefined });
@@ -505,6 +526,7 @@ async function main() {
     civ,
     port: WS_PORT,
     host: WS_HOST,
+    requireLogin: LOGIN_PROXY,
     staticDir: STATIC_DIR,
     tls,
     screenTitle: SCREEN_TITLE,
@@ -530,7 +552,10 @@ async function main() {
   const scheme = tls ? 'https' : 'http';
   const shownHost = WS_HOST ? (WS_HOST.includes(':') ? `[${WS_HOST}]` : WS_HOST) : '0.0.0.0';
   console.log(`Control server listening on ${scheme}://${shownHost}:${boundPort}`);
-  if (IDLE_LOGOUT_MINUTES) console.log(`Idle logout after ${IDLE_LOGOUT_MINUTES} min, to ${IDLE_LOGOUT_URL}`);
+  if (LOGIN_PROXY) {
+    console.log('LOGIN_PROXY on: every request needs a signed-in user from the login proxy on this Pi.');
+    console.log(IDLE_LOGOUT_MINUTES ? `Idle logout after ${IDLE_LOGOUT_MINUTES} min, to ${IDLE_LOGOUT_URL}` : 'Idle logout off.');
+  }
   console.log(`Serving PWA app shell from ${STATIC_DIR}`);
   if (!tls) {
     console.log(

@@ -28,7 +28,7 @@ This README has two parts:
 [Credits](#credits) and the [Licence](#licence) are at the end.
 
 ## Warning!
-Note that it DOES NOT include any form of login or password - so don't present it to the big bad internet or some rando will start controlling your rig! Always put it behind a firewall or VPN.
+Out of the box PiRO has NO login or password - so don't present it to the big bad internet or some rando will start controlling your rig! Always put it behind a firewall or VPN, or turn on the login (`LOGIN_PROXY`, below).
 
 PiRO does accept the WebSocket only from its own page, so another web site
 open in a browser on your network can't reach the radio through it. If
@@ -683,20 +683,34 @@ browser in the background usually won't chime at all.
 
 #### Access from the internet with a login
 
-PiRO has no login of its own. To open it to a group, such as club
-members, put a login proxy in front of it. [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/)
-works: it signs people in through the club's web site (for example a
-WordPress site with an OAuth or OpenID Connect server plugin) and only then
-passes them to PiRO, WebSocket included. A web server such as Caddy in
-front of it provides HTTPS, which the microphone needs.
+PiRO has no login unless you turn one on. To open it to a group, such as
+club members, put a login proxy in front of it and set `LOGIN_PROXY=on`.
+[oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) works: it
+signs people in through the club's web site (for example a WordPress site
+with an OAuth or OpenID Connect server plugin) and only then passes them
+to PiRO, WebSocket included. A web server such as Caddy in front of it
+provides HTTPS, which the microphone needs.
+
+With `LOGIN_PROXY` on, the login is mandatory:
+
+- PiRO listens on this Pi only (127.0.0.1), so only a proxy on the same
+  Pi can reach it.
+- Every page, file and WebSocket needs the signed-in user that the proxy
+  passes on (`X-Forwarded-User` or `X-Forwarded-Email`). Without one PiRO
+  answers 401 "Login required". The log shows who connects.
+- The only page without a login is the "Logged out" page.
+- PiRO won't start with a setting that leaves a way round the login:
+  `WS_HOST` other than 127.0.0.1, or the rigctl port open to other
+  computers (`RIGCTL_HOST`). The Icom LAN server has its own username and
+  password.
 
 On the Pi, in `/etc/piro/piro.env`:
 
 ```bash
-# Only the login proxy on this Pi can reach PiRO.
-WS_HOST=127.0.0.1
-# Log people out after an hour with no taps, clicks or keys.
-IDLE_LOGOUT_MINUTES=60
+LOGIN_PROXY=on
+# Log out after this many minutes with no taps, clicks or keys
+# (60 unless set; off for none).
+#IDLE_LOGOUT_MINUTES=60
 ```
 
 Leave `TLS_CERT_PATH` and `TLS_KEY_PATH` unset: the web server in front
@@ -704,21 +718,22 @@ does HTTPS. In oauth2-proxy's config:
 
 ```toml
 upstreams = ["http://127.0.0.1:8080/"]   # PiRO's WS_PORT
+pass_user_headers = true                  # the default: PiRO needs them
 # The page shown after an idle logout must load without a login.
 skip_auth_routes = ["GET=^/logged-out\\.html$"]
 ```
 
-- **Idle logout.** With `IDLE_LOGOUT_MINUTES` set, a browser with no
-  taps, clicks or keys for that long shows a warning for the last minute,
-  then closes its connection and goes to oauth2-proxy's sign-out
+- **Idle logout.** With the login on, a browser with no taps, clicks or
+  keys for an hour (`IDLE_LOGOUT_MINUTES`) shows a warning for the last
+  minute, then closes its connection and goes to oauth2-proxy's sign-out
   (`IDLE_LOGOUT_URL`). That ends with a "Logged out" page. Its **Log in
   again** button goes back to PiRO through the login. If the person is
   still signed in to the club web site, they come straight back in.
 - **An expired login.** When the WebSocket keeps failing, PiRO checks
-  whether the login proxy wants a login. If so, it reloads the page, and
-  the proxy shows its sign-in page.
-- Don't forward the Icom LAN server or rigctl ports to the internet:
-  they have no login through the proxy.
+  whether a login is needed. If so, it reloads the page, and the proxy
+  shows its sign-in page.
+- Don't forward the Icom LAN server ports to the internet unless you
+  mean to: its own password is its only protection.
 - If the proxy changes the `Host` header, set `ALLOWED_ORIGINS` to the
   address members browse to.
 
@@ -2004,8 +2019,9 @@ All settings are environment variables. For the systemd service they go in
 | `CIV_SCOPE_ENABLED` | off | `true` turns on the spectrum scope and waterfall. |
 | `CIV_MAXIMIZE_USB_LEVELS` | on | At start-up, sets the radio's USB audio levels to maximum. `0` or `false` leaves them alone. |
 | `WS_PORT` | `8080` | Port for the web app and its WebSocket. |
-| `WS_HOST` | all | The address the web app listens on. Unset: every address the Pi has. `127.0.0.1`: only programs on the Pi, such as a login proxy. See [Access from the internet with a login](#access-from-the-internet-with-a-login). |
-| `IDLE_LOGOUT_MINUTES` | off | Behind a login proxy: after this many minutes (1 to 1440) with no taps, clicks or keys, a browser warns for a minute, then closes its connection and goes to `IDLE_LOGOUT_URL`. |
+| `LOGIN_PROXY` | off | `on` makes a login mandatory, through a login proxy on this Pi such as oauth2-proxy: PiRO listens on 127.0.0.1 only and refuses any request without a signed-in user. See [Access from the internet with a login](#access-from-the-internet-with-a-login). Off: no login. |
+| `WS_HOST` | all | The address the web app listens on. Unset: every address the Pi has, or 127.0.0.1 with `LOGIN_PROXY` on. With the login on, nothing else is allowed. |
+| `IDLE_LOGOUT_MINUTES` | `60` with the login on | With `LOGIN_PROXY` on: after this many minutes (1 to 1440) with no taps, clicks or keys, a browser warns for a minute, then closes its connection and goes to `IDLE_LOGOUT_URL`. `off` or `0`: no idle logout. Ignored with the login off. |
 | `IDLE_LOGOUT_URL` | `/oauth2/sign_out?rd=%2Flogged-out.html` | Where an idle logout goes: oauth2-proxy's sign-out, then PiRO's "Logged out" page. Must start with `/` or `http(s)://`. |
 | `AUDIO_RX_DEVICE` | none | ALSA capture device, such as `plughw:CODEC,0`. Audio and all decoders are off without it. |
 | `AUDIO_TX_DEVICE` | same as RX | ALSA playback device for transmit audio. |
@@ -2177,9 +2193,14 @@ one hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac).
 - **After an idle logout, the sign-in page shows instead of "Logged
   out".** The login proxy needs `/logged-out.html` without a login: add
   `skip_auth_routes = ["GET=^/logged-out\\.html$"]` to oauth2-proxy's config.
-- **Behind a login proxy, PiRO's page can't be reached at all.** With
-  `WS_HOST=127.0.0.1`, the proxy must be on the same Pi and point at
-  `http://127.0.0.1:` and PiRO's `WS_PORT` (8080 unless set).
+- **With `LOGIN_PROXY` on, the page says "Login required".** PiRO didn't
+  get a signed-in user. The proxy must be on the same Pi, point at
+  `http://127.0.0.1:` and PiRO's `WS_PORT` (8080 unless set), and pass
+  the user on (oauth2-proxy's `pass_user_headers`, on by default). The log
+  says why each request was refused.
+- **With `LOGIN_PROXY` on, PiRO won't start: "Login settings: ...".**
+  `WS_HOST` or `RIGCTL_HOST` would let people in without the login. Use
+  127.0.0.1, or leave them unset.
 - **The service restarts over and over.** Look at `journalctl -u piro`. "The
   serial port ... closed unexpectedly" or an error opening the port means
   the radio is off or its USB is unplugged: PiRO keeps trying until it is
@@ -2428,8 +2449,12 @@ is a preview of the first page.
   browser needn't be near the radio.
 - Audio uses the radio's own USB codec through ALSA: no extra sound card
   or virtual audio cable.
-- There is no login. Remote use is expected over a VPN. PiRO compresses
-  audio for such links.
+- There is no login unless `LOGIN_PROXY` is on. Then it is mandatory:
+  every way in needs it (`src/server/login-proxy.js`), and a setting that
+  would leave a way round it stops PiRO at startup. A new listening port
+  must stay on loopback with the login on, or have its own login. Without
+  the login, remote use is expected over a VPN. PiRO compresses audio for
+  such links.
 
 `docs/civ-notes.md` has the CI-V command history and corrections, and is
 worth reading before changing anything in `src/civ/`.
@@ -2836,6 +2861,10 @@ The `connected` snapshot's `idleLogout` (`{minutes, url}`, from
 `IDLE_LOGOUT_MINUTES` and `IDLE_LOGOUT_URL`; `minutes` 0 is off) tells the
 browser to close its connection and go to `url` after that long with no
 input.
+With `LOGIN_PROXY` on, every HTTP request and the WebSocket need a
+signed-in user from the login proxy (`X-Forwarded-User` or
+`X-Forwarded-Email`) and must come from this Pi; the WebSocket is only
+accepted on `/`. Anything else gets 401.
 `lan-control` (`{active, client}`, also `lanControl` in the `connected`
 snapshot) is broadcast when a program on the Icom LAN server takes or
 gives back the radio; while active, every request is refused with
@@ -3152,10 +3181,12 @@ The test files:
   static-server.test.js   static file server tests: content types, 404s,
                            path-traversal protection, malformed URLs (400,
                            server keeps running)
-  login-proxy.test.js     behind a login proxy: WS_HOST (all addresses by
-                           default, loopback only when set), idleLogout in
-                           the snapshot, the logged-out page, and the
-                           service worker (page loads from the network
+  login-proxy.test.js     the login: off by default (no login needed);
+                           with LOGIN_PROXY on, loopback only, 401 without
+                           a signed-in user, the logged-out page the only
+                           exception, WebSocket only on /, unsafe settings
+                           refused; WS_HOST; idleLogout in the snapshot;
+                           the service worker (page loads from the network
                            first, cache offline, /oauth2/ never handled)
   idle-logout.test.mjs    the browser's idle logout with a fake clock
                            (warning, tap, logout once, a phone that slept)
