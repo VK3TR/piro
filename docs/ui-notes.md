@@ -5806,5 +5806,6 @@ showed up as "USB works, LSB doesn't" after USB-D was left on.
 
 - Server only: `src/server/ws-server.js`, `src/server/index.js`. No client
   change, so no service-worker bump. Env var in the README table.
-- Tested on air (IC-7300): USB and LSB voice both transmit from the browser
+- Tested on air (IC-7300), over an HTTPS connection (the browser microphone
+  needs a secure context): USB and LSB voice both transmit from the browser
   mic with the option on.
