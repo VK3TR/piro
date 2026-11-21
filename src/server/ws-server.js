@@ -908,7 +908,22 @@ class ControlServer extends EventEmitter {
           // option is on, force DATA mode on (USB-D/LSB-D) before keying a
           // voice PTT in an SSB mode so the mic audio actually goes out.
           // Confirmed before PTT, like the digital bridges.
-          if (msg.value) await this._ensureVoiceTxDataMode();
+          //
+          // Record the latest PTT intent first: WebSocket messages are
+          // handled concurrently, so a release can arrive DURING
+          // ensureDataMode()'s settle below. If it does, its PTT-off runs
+          // while we wait, and keying here afterwards would leave the radio
+          // transmitting with nobody holding the button (until the next
+          // release or the watchdog). So re-check the intent after the wait
+          // and bail if a release superseded this key-down.
+          this._pttDesired = msg.value;
+          if (msg.value) {
+            await this._ensureVoiceTxDataMode();
+            if (this._pttDesired !== true) {
+              ws.send(makeResult(id, { value: false }));
+              break;
+            }
+          }
           // Excludes the requesting client from the broadcast, same as
           // setFrequency/setMode above — that client already gets its own
           // confirmation via the result reply below.
