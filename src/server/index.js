@@ -361,6 +361,28 @@ const TLS_KEY_PATH = process.env.TLS_KEY_PATH;
 // here, comma-separated, e.g. "https://radio.example.net".
 const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
+// The address the web server listens on. Unset: every address the Pi has.
+// Behind a login proxy on the same Pi (e.g. oauth2-proxy), set 127.0.0.1 so
+// the app can only be reached through the proxy.
+const WS_HOST = (process.env.WS_HOST || '').trim() || null;
+
+// Idle logout, for use behind a login proxy: after this many minutes with
+// no tap, click or key in a browser, it closes its connection and goes to
+// IDLE_LOGOUT_URL (the proxy's sign-out). Off unless set; 1 to 1440.
+const IDLE_LOGOUT_MINUTES = (() => {
+  const n = parseInt(process.env.IDLE_LOGOUT_MINUTES || '', 10);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(1440, n);
+})();
+const IDLE_LOGOUT_URL = (() => {
+  const raw = (process.env.IDLE_LOGOUT_URL || '').trim();
+  if (!raw) return '/oauth2/sign_out?rd=%2Flogged-out.html';
+  if (raw.startsWith('/') && !raw.startsWith('//')) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  console.warn(`IDLE_LOGOUT_URL ignored: it must start with / or http(s)://. Got: ${raw}`);
+  return '/oauth2/sign_out?rd=%2Flogged-out.html';
+})();
+
 let civ;
 let controlServer;
 let audioBridge;
@@ -482,6 +504,7 @@ async function main() {
   controlServer = new ControlServer({
     civ,
     port: WS_PORT,
+    host: WS_HOST,
     staticDir: STATIC_DIR,
     tls,
     screenTitle: SCREEN_TITLE,
@@ -492,6 +515,7 @@ async function main() {
     sourceCodeUrl: SOURCE_CODE_URL,
     allowedOrigins: ALLOWED_ORIGINS,
     digitalTxGainMinDb: DIGITAL_TX_GAIN_MIN_DB,
+    idleLogout: { minutes: IDLE_LOGOUT_MINUTES, url: IDLE_LOGOUT_URL },
   });
   if (lan) {
     controlServer.on('client-connected', (ws) => {
@@ -504,7 +528,9 @@ async function main() {
   if (ALLOWED_ORIGINS.length) console.log(`WebSocket connections also allowed from: ${ALLOWED_ORIGINS.join(', ')}`);
   const boundPort = await controlServer.listen();
   const scheme = tls ? 'https' : 'http';
-  console.log(`Control server listening on ${scheme}://0.0.0.0:${boundPort}`);
+  const shownHost = WS_HOST ? (WS_HOST.includes(':') ? `[${WS_HOST}]` : WS_HOST) : '0.0.0.0';
+  console.log(`Control server listening on ${scheme}://${shownHost}:${boundPort}`);
+  if (IDLE_LOGOUT_MINUTES) console.log(`Idle logout after ${IDLE_LOGOUT_MINUTES} min, to ${IDLE_LOGOUT_URL}`);
   console.log(`Serving PWA app shell from ${STATIC_DIR}`);
   if (!tls) {
     console.log(

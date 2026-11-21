@@ -5861,3 +5861,50 @@ second LAN client. Service-worker cache v152.
   audio, squelch, FreeDV and mic tests pass unchanged.
 - Not tested with real phones on a net, and not tested on air.
 - Service-worker cache v153.
+
+### Members' login: listen address, expired logins, idle logout (v154)
+- **New (requested).** A club wants members to reach its PiRO from the
+  internet, signed in through the club's WordPress site with oauth2-proxy
+  in front. Three changes make that work. No logout link and no limits on
+  who may transmit: the club asked for neither.
+- **`WS_HOST`.** The address PiRO listens on. Unset, it listens on every
+  address, as before. `127.0.0.1` puts it behind a proxy on the same Pi.
+  The startup log shows the real address.
+- **Expired logins.** The service worker answered page loads from its
+  cache, so a member whose login had expired got PiRO's page from the cache,
+  and the WebSocket (refused by the proxy) failed for ever: "Connecting…"
+  with no way to log in. Now page loads go to the network first and use
+  the cache only offline. `/oauth2/` paths, `/logged-out.html` and the
+  login check are never handled. After two failed connects in a row,
+  RigLink fetches `/manifest.webmanifest?auth-check` without following
+  redirects (at most every 30 s). A redirect, 401 or 403 can only come from
+  the proxy, so the page reloads and the proxy shows its sign-in page
+  (login-check.js).
+- **Idle logout.** `IDLE_LOGOUT_MINUTES` (off unless set; the club wants
+  60) and `IDLE_LOGOUT_URL` (default oauth2-proxy's
+  `/oauth2/sign_out?rd=%2Flogged-out.html`) go to the browser in the
+  connect snapshot (`idleLogout`). A tap, click, key or scroll restarts the
+  count. In the last minute a banner says "Logging out in N s". Then the
+  page stops its audio, closes the connection and goes to the URL. Time
+  is measured by the clock, so a phone that slept logs out when it wakes
+  (idle-logout.js). The new `logged-out.html` is standalone, so the proxy
+  can serve it without a login (`skip_auth_routes`). Without it, single
+  sign-on would log the member straight back in.
+- **A real bug, found by the UI test.** IdleLogout's default timer was
+  `setInterval` itself, called as a method of the object. Browsers throw
+  "Illegal invocation" for that (Node doesn't), so the timer never ran.
+  It now wraps the call.
+- Tests: login-proxy.test.js (new): WS_HOST unset binds every address,
+  127.0.0.1 binds loopback only and refuses the LAN address; idleLogout
+  in the snapshot, off by default; logged-out.html and the login check
+  served with 200; sw.js run in a vm: page loads network first, the cache
+  offline, the proxy's paths never handled, app files still cache first.
+  idle-logout.test.mjs (new): the warning, a tap, one logout, a slept
+  phone, short limits, turning it off; the login check's decisions.
+  manual-tty-ui.js: a real idle logout at 0.1 minutes (warning, tap,
+  logout, connection closed, "Log in again"), and a stand-in login proxy
+  whose login expires: the page reloads to its sign-in page through the
+  service worker. The rest of manual-tty-ui.js stops at the JTTY Send step
+  here, on main too, so that part is not from this change.
+- Not tested with a real oauth2-proxy or WordPress site.
+- Service-worker cache v154.

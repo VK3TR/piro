@@ -14,7 +14,7 @@ Hamlib, no separate audio server and no extra apps.
 Written by VK3TR. Licensed AGPL-3.0-only (see
 [Licence](#licence)).
 
-**Current build: v153.** This is the version the app shows next to its title.
+**Current build: v154.** This is the version the app shows next to its title.
 It is the `CACHE_NAME` number in `src/client/sw.js`, which goes up with every
 change to the web app.
 
@@ -34,6 +34,8 @@ PiRO does accept the WebSocket only from its own page, so another web site
 open in a browser on your network can't reach the radio through it. If
 you put PiRO behind a reverse proxy that changes the host name, see
 `ALLOWED_ORIGINS` in the [Configuration reference](#configuration-reference).
+To let people in from the internet, put a login in front of it: see
+[Access from the internet with a login](#access-from-the-internet-with-a-login).
 
 ---
 
@@ -678,6 +680,47 @@ browser opened later sees them) and cleared after an hour with no new
 note, or two minutes after the last browser closes. Browsers only play
 sound once the page has been tapped, and a phone that is locked or has the
 browser in the background usually won't chime at all.
+
+#### Access from the internet with a login
+
+PiRO has no login of its own. To open it to a group, such as club
+members, put a login proxy in front of it. [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/)
+works: it signs people in through the club's web site (for example a
+WordPress site with an OAuth or OpenID Connect server plugin) and only then
+passes them to PiRO, WebSocket included. A web server such as Caddy in
+front of it provides HTTPS, which the microphone needs.
+
+On the Pi, in `/etc/piro/piro.env`:
+
+```bash
+# Only the login proxy on this Pi can reach PiRO.
+WS_HOST=127.0.0.1
+# Log people out after an hour with no taps, clicks or keys.
+IDLE_LOGOUT_MINUTES=60
+```
+
+Leave `TLS_CERT_PATH` and `TLS_KEY_PATH` unset: the web server in front
+does HTTPS. In oauth2-proxy's config:
+
+```toml
+upstreams = ["http://127.0.0.1:8080/"]   # PiRO's WS_PORT
+# The page shown after an idle logout must load without a login.
+skip_auth_routes = ["GET=^/logged-out\\.html$"]
+```
+
+- **Idle logout.** With `IDLE_LOGOUT_MINUTES` set, a browser with no
+  taps, clicks or keys for that long shows a warning for the last minute,
+  then closes its connection and goes to oauth2-proxy's sign-out
+  (`IDLE_LOGOUT_URL`). That ends with a "Logged out" page. Its **Log in
+  again** button goes back to PiRO through the login. If the person is
+  still signed in to the club web site, they come straight back in.
+- **An expired login.** When the WebSocket keeps failing, PiRO checks
+  whether the login proxy wants a login. If so, it reloads the page, and
+  the proxy shows its sign-in page.
+- Don't forward the Icom LAN server or rigctl ports to the internet:
+  they have no login through the proxy.
+- If the proxy changes the `Host` header, set `ALLOWED_ORIGINS` to the
+  address members browse to.
 
 #### Other programs: the rigctl port
 
@@ -1961,6 +2004,9 @@ All settings are environment variables. For the systemd service they go in
 | `CIV_SCOPE_ENABLED` | off | `true` turns on the spectrum scope and waterfall. |
 | `CIV_MAXIMIZE_USB_LEVELS` | on | At start-up, sets the radio's USB audio levels to maximum. `0` or `false` leaves them alone. |
 | `WS_PORT` | `8080` | Port for the web app and its WebSocket. |
+| `WS_HOST` | all | The address the web app listens on. Unset: every address the Pi has. `127.0.0.1`: only programs on the Pi, such as a login proxy. See [Access from the internet with a login](#access-from-the-internet-with-a-login). |
+| `IDLE_LOGOUT_MINUTES` | off | Behind a login proxy: after this many minutes (1 to 1440) with no taps, clicks or keys, a browser warns for a minute, then closes its connection and goes to `IDLE_LOGOUT_URL`. |
+| `IDLE_LOGOUT_URL` | `/oauth2/sign_out?rd=%2Flogged-out.html` | Where an idle logout goes: oauth2-proxy's sign-out, then PiRO's "Logged out" page. Must start with `/` or `http(s)://`. |
 | `AUDIO_RX_DEVICE` | none | ALSA capture device, such as `plughw:CODEC,0`. Audio and all decoders are off without it. |
 | `AUDIO_TX_DEVICE` | same as RX | ALSA playback device for transmit audio. |
 | `AUDIO_SAMPLE_RATE` | `48000` | Audio sample rate. |
@@ -2128,6 +2174,12 @@ one hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac).
   page. Behind a reverse proxy that changes the `Host` header, add the
   address in the browser's address bar to `ALLOWED_ORIGINS`, such as
   `ALLOWED_ORIGINS=https://radio.example.net`.
+- **After an idle logout, the sign-in page shows instead of "Logged
+  out".** The login proxy needs `/logged-out.html` without a login: add
+  `skip_auth_routes = ["GET=^/logged-out\\.html$"]` to oauth2-proxy's config.
+- **Behind a login proxy, PiRO's page can't be reached at all.** With
+  `WS_HOST=127.0.0.1`, the proxy must be on the same Pi and point at
+  `http://127.0.0.1:` and PiRO's `WS_PORT` (8080 unless set).
 - **The service restarts over and over.** Look at `journalctl -u piro`. "The
   serial port ... closed unexpectedly" or an error opening the port means
   the radio is off or its USB is unplugged: PiRO keeps trying until it is
@@ -2334,7 +2386,8 @@ browser. There is no build step: the browser loads plain ES modules.
 - **The client** (`src/client/`): `app.js` is the whole UI. `rpc.js`
   (RigLink) wraps the WebSocket and re-dispatches every server event as a
   DOM event. `audio.js` plays and records with Web Audio. `scope.js` draws
-  the spectrum and waterfall. `sw.js` caches the app for offline start.
+  the spectrum and waterfall. `sw.js` caches the app for offline start;
+  page loads go to the network first, so a login proxy can redirect them.
 
 [`docs/architecture.drawio`](docs/architecture.drawio) is a UML diagram of
 the main classes and how they connect: browser client, server, feature
@@ -2424,7 +2477,8 @@ src/
                          WebAssembly), xara/xara.js, vara-worker.js
               tty-bridge.js sends RTTY, JTTY, Olivia and Feld-Hell.
   client/     the PWA: index.html, styles.css, app.js (the whole UI),
-              rpc.js (RigLink), audio.js, mic-capture-processor.js,
+              rpc.js (RigLink), login-check.js, idle-logout.js,
+              logged-out.html, audio.js, mic-capture-processor.js,
               audio-codec.js (shared with the server), scope.js, smeter.js,
               vswr.js, ft8-qso.js, sw.js, manifest and icons
 test/         *.test.js and *.test.mjs (npm test), manual-*.js (see Testing)
@@ -2778,6 +2832,10 @@ change the mode) are refused with "Can't change that while transmitting."
 snapshot) is broadcast when the radio stops answering CI-V (several
 requests in a row timed out, none answered for 30 s) and when it answers
 again; requests are still tried meanwhile.
+The `connected` snapshot's `idleLogout` (`{minutes, url}`, from
+`IDLE_LOGOUT_MINUTES` and `IDLE_LOGOUT_URL`; `minutes` 0 is off) tells the
+browser to close its connection and go to `url` after that long with no
+input.
 `lan-control` (`{active, client}`, also `lanControl` in the `connected`
 snapshot) is broadcast when a program on the Icom LAN server takes or
 gives back the radio; while active, every request is refused with
@@ -3094,6 +3152,14 @@ The test files:
   static-server.test.js   static file server tests: content types, 404s,
                            path-traversal protection, malformed URLs (400,
                            server keeps running)
+  login-proxy.test.js     behind a login proxy: WS_HOST (all addresses by
+                           default, loopback only when set), idleLogout in
+                           the snapshot, the logged-out page, and the
+                           service worker (page loads from the network
+                           first, cache offline, /oauth2/ never handled)
+  idle-logout.test.mjs    the browser's idle logout with a fake clock
+                           (warning, tap, logout once, a phone that slept)
+                           and its login check after failed connects
   tls-server.test.js      confirms the server actually works over
                            HTTPS/WSS when TLS_CERT_PATH/TLS_KEY_PATH are set
   lan-paddle-preparation.test.js  native CW cold preparation, scheduled edges and preparation cancellation
@@ -3330,7 +3396,9 @@ The test files:
   jtty-decoder-bridge.test.js  JTTY receive bridge: arming, PTT, decimation,
                            backlog dropping, broadcasts
   manual-tty-ui.js        optional browser test of the TTY button, text box and
-                           Send/Stop (needs Playwright and Chromium)
+                           Send/Stop, the idle logout, and an expired login
+                           behind a stand-in login proxy (needs Playwright
+                           and Chromium)
   manual-audio-ui.js      optional browser test of compressed audio: three
                            browsers on full, Opus (WebCodecs) and ADPCM, RX
                            played, the fake microphone sent in each format,

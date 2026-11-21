@@ -168,6 +168,7 @@ class ControlServer extends EventEmitter {
   constructor({
     civ,
     port = 8080,
+    host,
     staticDir,
     tls,
     screenTitle,
@@ -184,10 +185,15 @@ class ControlServer extends EventEmitter {
     allowedOrigins = [],
     notesIdleMs = NOTES_IDLE_MS,
     notesEmptyGraceMs = NOTES_EMPTY_GRACE_MS,
+    idleLogout = { minutes: 0, url: null },
   }) {
     super();
     this.civ = civ;
     this.port = port;
+    // The address to listen on (WS_HOST): all of the Pi's addresses unless
+    // set, e.g. 127.0.0.1 behind a login proxy so the app can only be
+    // reached through it.
+    this.host = host || null;
     this.tls = tls ?? null;
     // Fail-safe transmission cutoff: default 10 minutes, per the
     // Australian amateur class licence's condition on remote/computer
@@ -492,6 +498,10 @@ class ControlServer extends EventEmitter {
       cwKeying: false, // the CW paddle is keying (EVENT.CW_KEYING); see cw-paddle-bridge.js
       transmitting: false, // the radio is, or may be, transmitting (EVENT.TRANSMITTING); see ControlServer#transmitting
       lanControl: { active: false, client: null }, // a LAN client has the radio and PiRO is paused (EVENT.LAN_CONTROL); see pause()
+      // Idle logout (IDLE_LOGOUT_MINUTES / IDLE_LOGOUT_URL): after `minutes`
+      // without a tap, click or key, the browser closes its connection and
+      // goes to `url` (a login proxy's sign-out). 0: off.
+      idleLogout: { minutes: idleLogout?.minutes || 0, url: idleLogout?.url || null },
       radioAnswering: true, // false while the radio isn't answering CI-V (EVENT.RADIO_ANSWERING; CivDriver 'answering')
     };
     this.cwPaddle = null; // set by CwPaddleBridge#start()
@@ -1695,11 +1705,14 @@ class ControlServer extends EventEmitter {
     ]);
 
     return new Promise((resolve) => {
-      this.httpServer.listen(this.port, () => {
+      const done = () => {
         const addr = this.httpServer.address();
         this.port = typeof addr === 'object' && addr ? addr.port : this.port;
+        this.boundAddress = typeof addr === 'object' && addr ? addr.address : null;
         resolve(this.port);
-      });
+      };
+      if (this.host) this.httpServer.listen(this.port, this.host, done);
+      else this.httpServer.listen(this.port, done);
     });
   }
 

@@ -1174,7 +1174,9 @@ button {
   font-size: 0.9rem;
 }
 
-/* PiRO paused: a LAN client has the radio (app.js, 'lan-control'). */
+/* PiRO paused: a LAN client has the radio (app.js, 'lan-control'), and
+   the idle logout warning (idle-logout.js). */
+.idle-line,
 .paused-line {
   margin: 8px 0;
   padding: 10px 12px;
