@@ -605,7 +605,7 @@ class Ft8Bridge {
       // keying (a quick read when it is; see civ/data-mode-guard.js).
       await ensureDataMode(this.civ, true, { settleMs: this.dataSettleMs });
       await this.controlServer.setPttFromServer(true);
-      this.audioBridge.playback.write(outPcm);
+      this.audioBridge.writeGenerated(outPcm);
 
       const durationMs = (outPcm.length / 2 / this.audioBridge.sampleRate) * 1000;
       // See PTT_RELEASE_MARGIN_MS's doc comment: hold PTT for longer than

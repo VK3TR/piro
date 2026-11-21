@@ -61,6 +61,10 @@ const CW_PADDLE_DELAY_MS = (() => {
   return 250;
 })();
 const RADIO_MODEL = process.env.CIV_RADIO_MODEL; // e.g. "IC-7300"
+// TX echo: in a voice mode (SSB, AM, FM or FreeDV), a browser's mic audio
+// is also sent to every other browser, so people sharing the radio hear
+// each other transmit (a group net, say). On unless set to 0/false/off/no.
+const TX_AUDIO_ECHO = !/^(0|false|off|no)$/i.test((process.env.TX_AUDIO_ECHO || '').trim());
 // Hamlib-style control port (rigctl-server.js), for loggers and programs
 // using "Hamlib NET rigctl". Off unless RIGCTL_PORT is set (4532 is
 // Hamlib's usual port). RIGCTL_HOST: 127.0.0.1 (programs on the Pi only)
@@ -331,6 +335,18 @@ const SCOPE_ENABLED = /^(1|true)$/i.test(process.env.CIV_SCOPE_ENABLED || '');
 // "false" to skip this and leave the radio's levels as found.
 const CIV_MAXIMIZE_USB_LEVELS = !/^(0|false)$/i.test(process.env.CIV_MAXIMIZE_USB_LEVELS || '1');
 
+// TX Adjust (digital-drive) attenuation floor, in dB. The slider and the
+// SET_DIGITAL_TX_GAIN validation run from 0 down to this. Attenuation-only,
+// so it must be negative; default -50, clamped to [-120, -1]. See
+// audio-bridge.js#writeGenerated and ws-server.js (SET_DIGITAL_TX_GAIN).
+const DIGITAL_TX_GAIN_MIN_DB = (() => {
+  const raw = process.env.DIGITAL_TX_GAIN_MIN_DB;
+  if (raw == null || raw === '') return -50;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return -50;
+  return Math.max(-120, Math.min(-1, n));
+})();
+
 // TLS is optional but strongly recommended: without it, microphone access
 // (getUserMedia) is unavailable in the browser entirely on any origin
 // other than localhost, which breaks PTT/TX audio when accessed over the
@@ -475,6 +491,7 @@ async function main() {
     rnnoiseLevelCount: RNNOISE_LEVEL_COUNT,
     sourceCodeUrl: SOURCE_CODE_URL,
     allowedOrigins: ALLOWED_ORIGINS,
+    digitalTxGainMinDb: DIGITAL_TX_GAIN_MIN_DB,
   });
   if (lan) {
     controlServer.on('client-connected', (ws) => {
@@ -539,6 +556,7 @@ async function main() {
       rxDevice: AUDIO_RX_DEVICE,
       txDevice: AUDIO_TX_DEVICE,
       ...(lan ? { capture: civ.capture, playback: civ.playback, maximizeVolumeOnStart: false } : {}),
+      txEcho: TX_AUDIO_ECHO,
       sampleRate: AUDIO_SAMPLE_RATE,
       channels: AUDIO_CHANNELS,
       opusBitrate: AUDIO_OPUS_BITRATE,

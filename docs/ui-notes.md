@@ -5699,35 +5699,6 @@ also in v142.
   gone when the radio answers.
 - Service-worker cache v146.
 
-### Read the SWR/ALC meters during server-driven transmits (v148)
-- **Real bug.** The transmit meters (SWR, ALC, power and the rest) only
-  updated while the on-screen PTT button was held. During a transmit the
-  server drives itself -- FT8/FT4, WSPR, CW text, the CW paddle -- the browser
-  did not poll them, so the meters sat still just when the operator wanted to
-  watch ALC.
-- **Cause.** The meter poll keyed off the local PTT-button state instead of
-  the "on the air for any reason" signal the server already broadcasts.
-- **Now.** The poll uses `isTransmitting()` = `radioTransmitting || pttActive`.
-  `radioTransmitting` follows the `transmitting` event and the connect
-  snapshot (PTT on, an unconfirmed PTT release, the CW paddle keying, CW text
-  going out), so the meters read during any transmit, however it was started.
-- Tests: the meter-mode and S-meter modules keep their unit tests
-  (meter-modes.test.mjs, smeter.test.mjs); the poll-timing change is client UI
-  wiring, checked by watching the meters during an FT8 and a paddle-CW transmit.
-- Service-worker cache v148.
-### Wider desktop layout and draggable decode-table columns (v147)
-- On screens 900 px and wider the panels drop their 640 px max-width and use
-  almost the whole window (a CSS media query; no JavaScript, no user-agent
-  sniffing). Phones and narrow windows are unchanged.
-- The decode tables (FT8/FT4, JTTY, WSPR) get draggable column dividers on
-  those wide screens (src/client/table-resize.js): each column except the
-  last takes an explicit width, the Message column flexes to stay widest, and
-  a faint divider by each header brightens on hover and while dragging. Narrow
-  screens never get the `data-resizable` attribute, so the compact
-  fixed-column layout is untouched.
-- No real bug; both are enhancements.
-- Tests: no automated test for the drag UI (it needs a real browser); checked
-  by eye in a desktop browser. The responsive width is pure CSS.
 ### rigctl port: Hamlib 4.6 clients (v147)
 - **Real bug, found by CI.** GitHub's runners moved to Ubuntu 26.04, which
   installs Hamlib 4.6.5, and rigctl-server.test.js began failing on every
@@ -5750,6 +5721,40 @@ also in v142.
   4.6 prints `0.5` where 4.5 printed `0.500000`. Passes here with Hamlib
   4.5.5; CI runs 4.6.5.
 - Service-worker cache v147.
+
+### Wider desktop layout and draggable decode-table columns (v147)
+- On screens 900 px and wider the panels drop their 640 px max-width and use
+  almost the whole window (a CSS media query; no JavaScript, no user-agent
+  sniffing). Phones and narrow windows are unchanged.
+- The decode tables (FT8/FT4, JTTY, WSPR) get draggable column dividers on
+  those wide screens (src/client/table-resize.js): each column except the
+  last takes an explicit width, the Message column flexes to stay widest, and
+  a faint divider by each header brightens on hover and while dragging. Narrow
+  screens never get the `data-resizable` attribute, so the compact
+  fixed-column layout is untouched.
+- No real bug; both are enhancements.
+- Tests: no automated test for the drag UI (it needs a real browser); checked
+  by eye in a desktop browser. The responsive width is pure CSS.
+- Service-worker cache v147: merged after the rigctl fix above without a
+  build change of its own, so it shares v147. Phones that already had v147
+  picked up its layout with v148.
+
+### Read the SWR/ALC meters during server-driven transmits (v148)
+- **Real bug.** The transmit meters (SWR, ALC, power and the rest) only
+  updated while the on-screen PTT button was held. During a transmit the
+  server drives itself -- FT8/FT4, WSPR, CW text, the CW paddle -- the browser
+  did not poll them, so the meters sat still just when the operator wanted to
+  watch ALC.
+- **Cause.** The meter poll keyed off the local PTT-button state instead of
+  the "on the air for any reason" signal the server already broadcasts.
+- **Now.** The poll uses `isTransmitting()` = `radioTransmitting || pttActive`.
+  `radioTransmitting` follows the `transmitting` event and the connect
+  snapshot (PTT on, an unconfirmed PTT release, the CW paddle keying, CW text
+  going out), so the meters read during any transmit, however it was started.
+- Tests: the meter-mode and S-meter modules keep their unit tests
+  (meter-modes.test.mjs, smeter.test.mjs); the poll-timing change is client UI
+  wiring, checked by watching the meters during an FT8 and a paddle-CW transmit.
+- Service-worker cache v148.
 
 ### FT8/FT4: send the 4-character grid in CQ and grid-report messages (v149)
 - **Real bug (found on air, 2026-11-19).** With a 6-character Maidenhead grid
@@ -5774,7 +5779,89 @@ also in v142.
   no-op, reports/73, a grid-less CQ, and free text.
 - Service-worker cache v149.
 
-### FT8/FT4 correct-slot scheduling + boundary-time transmit (v150)
+### TX Adjust: mic-gain hidden in SSTV (v151)
+
+Follow-up to the TX Adjust work. SSTV transmits server-generated tones
+with the radio forced into DATA MODE, so the browser microphone is never
+in the SSTV transmit path (see sstv-tx-bridge.js) -- the mic-gain control
+did nothing while SSTV was selected. It is now hidden when `sstvActive`
+(re-run from updateSsbChip() so it tracks the mode toggle); TX Adjust is
+the drive control for SSTV.
+
+FreeDV/RADE keeps both controls, because there they do different jobs:
+mic-gain sets the voice level feeding the RADE encoder, and TX Adjust
+sets the drive of the encoded modem waveform (the audio the radio and its
+ALC actually see).
+
+- Client only: app.js. Service-worker cache v151.
+
+### TX Adjust: software drive for digital modes (v152)
+
+The complete TX Adjust feature (the earlier commits added the control; this
+section documents it and folds in review fixes).
+
+**What it is.** A software gain on the server-generated digital TX audio
+(FT8/FT4/WSPR/JS8/RTTY/Olivia/Hell/VARA/SSTV/EasyPal/RADE) -- the
+digital-mode equivalent of WSJT-X's Pwr slider. Set your drive while
+watching ALC without touching the radio. `AudioBridge.writeGenerated()` is
+the single chokepoint that scales the PCM (0 dB = unity); mic/voice audio
+is never touched. Attenuation-only (0 down to `DIGITAL_TX_GAIN_MIN_DB`,
+default -50 dB, clamped `[-120, -1]`): with the radio's USB MOD level maxed
+you need sizeable cuts to bring ALC down, and boosting generated audio
+would only clip.
+
+**Server-owned, not per-browser.** One gain for the single radio. A change
+is sent with `setDigitalTxGain` (range-validated in ws-server.js), stored on
+the server, and broadcast (`DIGITAL_TX_GAIN`) to every client; the connect
+snapshot carries the current value so a joining browser adopts it. The
+client keeps no localStorage copy -- that would fight the shared value.
+
+**Review fixes in this build.**
+- The slider drag is now a preview: the confirmed value only changes when
+  the server acknowledges, and a rejected change (e.g. PiRO paused for
+  another LAN client) snaps the UI back -- the README's server-as-source-
+  of-truth rule.
+- Removed the obsolete per-browser localStorage persistence.
+- The popover note now reads "next transmission (next audio frame in
+  FreeDV)": buffered modes build the whole waveform at send time, but RADE
+  streams frames, so a change there takes effect mid-over.
+- Fixed a merge artifact: a missing CSS brace on `.tx-power__value--open`
+  had nested the desktop column-resizer rules under it.
+
+**Config.** `DIGITAL_TX_GAIN_MIN_DB` (README env-var table) sets the floor.
+
+**Tests.** digital-tx-gain.test.js: `writeGenerated()` attenuates by the set
+dB, 0 dB is unity passthrough, and positive gain is clamped; plus the
+updated mode-bridge stubs. Server range-validation lives in ws-server.js;
+the client restore-on-reject is UI wiring, checked by pausing PiRO for a
+second LAN client. Service-worker cache v152.
+
+### Hear each other transmit: TX echo to the other browsers (v153)
+- **New (requested).** People sharing the radio couldn't hear each other
+  transmit: the radio's own audio is silent while it transmits, and a
+  browser's mic went only to the radio. That made a group net hard.
+- **Now.** In a voice mode, each packet of a browser's mic audio is also
+  sent to every other browser, in each one's own format (raw PCM, Opus or
+  ADPCM), as if it were received audio (AudioBridge#_echoTx). The talker
+  isn't sent its own voice. Voice modes: LSB, USB, AM or FM with DATA
+  mode off and no data app mode on (FT8, JTTY, Olivia, JS8, Feld-Hell,
+  VARA, SSTV, WSPR, fax, EasyPal), or FreeDV (the echo is the speech,
+  before RADE encodes it).
+- While the echo flows, and for 300 ms after the last mic packet, the
+  radio's received audio (silence while transmitting) isn't sent: the two
+  would interleave and pile up in the browsers' players. It still reaches
+  the server's own listeners.
+- `TX_AUDIO_ECHO`, on by default; `off` (or 0, false, no) turns it off.
+- Tests: tx-echo.test.js (new): the other browsers get the talker's audio
+  byte for byte and the talker doesn't; received audio held back, then
+  flowing again after the hold; LSB, AM, FM and FreeDV echo, USB-D, CW,
+  RTTY, FT8, SSTV and VARA don't; off with the setting; Opus and ADPCM
+  browsers get their own formats; two talkers each hear the other; end to
+  end with a real ControlServer and two WebSocket clients. The existing
+  audio, squelch, FreeDV and mic tests pass unchanged.
+- Not tested with real phones on a net, and not tested on air.
+- Service-worker cache v153.
+### FT8/FT4 correct-slot scheduling + boundary-time transmit (v154)
 
 Two related fixes to how a reply is scheduled and transmitted, so an
 on-air QSO actually completes:
@@ -5803,4 +5890,4 @@ already-encoded audio with no encode on the critical path.
 - Server: ft8-bridge.js, slot-clock.js, protocol.js (replySlotMs),
   ws-server.js. Client: app.js (remembers the answered decode's slot
   and sends replySlotMs). Test: ft8-bridge.test.js.
-- Service-worker cache v150.
+- Service-worker cache v154.

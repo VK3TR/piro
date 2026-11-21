@@ -14,7 +14,7 @@ Hamlib, no separate audio server and no extra apps.
 Written by VK3TR. Licensed AGPL-3.0-only (see
 [Licence](#licence)).
 
-**Current build: v150.** This is the version the app shows next to its title.
+**Current build: v154.** This is the version the app shows next to its title.
 It is the `CACHE_NAME` number in `src/client/sw.js`, which goes up with every
 change to the web app.
 
@@ -588,6 +588,14 @@ From the top:
   audio is made on the Pi. Above about 80% of full scale, peaks are
   rounded off rather than clipped hard. Watch the **ALC** meter while you
   talk to set it. Not tested on air.
+- **TX Adjust**: software drive for the digital and data modes (FT8/FT4,
+  WSPR, JS8, RTTY, SSTV, FreeDV and the rest) — the counterpart to
+  **Mic** for the audio PiRO generates on the Pi, so it shows only in those
+  modes. A compact dB value; tap it for a slider. Attenuation only, 0 dB
+  down to a floor (`DIGITAL_TX_GAIN_MIN_DB`, −50 dB by default): like
+  WSJT-X's Pwr slider, set it while watching the **ALC** meter. Unlike
+  **Mic**, it is one shared setting for the radio, so every browser sees the
+  same value.
 - **Power**: 100, 75, 50, 25 or 5 W (1 to 5 W in WSPR).
 - **Spectrum scope and waterfall**, if `CIV_SCOPE_ENABLED=true` and your
   radio sends scope data. It stays centred on your frequency. **Scope
@@ -649,6 +657,12 @@ it open now, yours included.
 - Everyone has the same control. Nothing stops two people transmitting at
   once, and two microphones at once garble the audio. Agree who has the
   radio: the notes help.
+- **You hear each other transmit.** In SSB, AM, FM and FreeDV, what one
+  person says into their phone while transmitting is also played in every
+  other browser, as if it were received audio (the radio itself is silent
+  while transmitting). That makes a group net work. You don't hear
+  yourself. It is off in the data modes (FT8, RTTY, SSTV and the rest) and
+  with DATA mode on. To turn it off, set `TX_AUDIO_ECHO=off`.
 - When the last browser closes, PiRO stops any transmission and the
   receivers. Phones disconnect often, so don't rely on a page staying open.
 
@@ -1951,6 +1965,7 @@ All settings are environment variables. For the systemd service they go in
 | `AUDIO_TX_DEVICE` | same as RX | ALSA playback device for transmit audio. |
 | `AUDIO_SAMPLE_RATE` | `48000` | Audio sample rate. |
 | `AUDIO_CHANNELS` | `1` | Number of audio channels. |
+| `TX_AUDIO_ECHO` | on | In SSB, AM, FM and FreeDV, a browser's microphone audio while transmitting is also played in every other browser, so people sharing the radio hear each other. `off` turns it off. |
 | `AUDIO_OPUS_BITRATE` | `24000` | Opus bit rate for compressed audio, in bits per second (6000 to 128000). See [Compressed audio for remote use](#compressed-audio-for-remote-use). `AUDIO_CODEC` is no longer used: each browser chooses. |
 | `SCREEN_TITLE` | `PiRO` | Title shown in the browser tab and on the page (a link to the source, see `SOURCE_CODE_URL`). |
 | `JTTY_TX_FREQ_HZ` | `1450` | Audio frequency of JTTY's lowest tone, in Hz. The signal fills about 94 Hz above it. |
@@ -2018,6 +2033,7 @@ All settings are environment variables. For the systemd service they go in
 | `RADE_TX_BIN`, `RADE_RX_BIN`, `LPCNET_DEMO_BIN` | `radae_tx`, `radae_rx`, `lpcnet_demo` | Locations of the FreeDV RADE programs. |
 | `RADE_VERSION` | `v1` | `v1` (stable) or `v2` (under development; both ends must match). |
 | `RADE_TX_GAIN` | `4` | Transmit drive multiplier for RADE. |
+| `DIGITAL_TX_GAIN_MIN_DB` | `-50` | Floor (most-negative dB) of the **TX Adjust** control for generated digital modes (FT8/FT4/WSPR/JS8/RTTY/SSTV/FreeDV/…). Attenuation-only; clamped to `[-120, -1]`. |
 | `FREEDV_REPORTER_ENABLED` | on | `0` or `false` stops any reporting to the FreeDV Reporter. Reporting also needs the "FDV Spot" box ticked in the UI. |
 | `FREEDV_REPORTER_HOST` | public service | Only for testing against your own Reporter server. |
 
@@ -2743,7 +2759,11 @@ browser may be at most 8 MiB (the largest real one, an EasyPal picture,
 is under 6 MB); a bigger one closes that browser's connection (code 1009).
 `setFrequency` takes a frequency in Hz from 1 to 9,999,999,999 (CI-V's 10
 digits), rounded to whole Hz; whether the radio covers it is up to the
-radio. `cwKey` (`{session, t, d}`) is one CW paddle element: the server
+radio. `setDigitalTxGain` (`{db}`) sets the software drive on PiRO’s
+generated digital audio; it is validated to the attenuation range (0 dB down
+to `DIGITAL_TX_GAIN_MIN_DB`), kept as one shared value for the radio,
+broadcast as `digital-tx-gain`, and included in the `connected` snapshot as
+`digitalTxGainDb`. `cwKey` (`{session, t, d}`) is one CW paddle element: the server
 holds it `CW_PADDLE_DELAY_MS` and keys it on its own clock; `cw-keying`
 (`{active}`) is broadcast when the paddle starts and stops keying.
 `transmitting` (`{active}`, also in the `connected` snapshot) is broadcast
@@ -3183,6 +3203,11 @@ The test files:
                            front-panel changes kept
   cw-stop-client.test.js  client Stop action stays available after an
                            uncertain CW error and resets on confirmed RX
+  tx-echo.test.js         TX echo: the other browsers hear the talker, in
+                           their own formats; the talker doesn't hear
+                           itself; received audio held back while it
+                           flows; only in voice modes and FreeDV; off with
+                           TX_AUDIO_ECHO=off; end to end over WebSocket
   tx-safety.test.js       transmit safety (issues #75-#79), with a stand-in
                            radio that rejects PTT-off: release confirmed or
                            reported; settings put back only once unkeyed
