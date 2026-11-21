@@ -5600,7 +5600,6 @@ micGainSelect.addEventListener('change', () => {
 // which scales the generated PCM (see audio-bridge.js#writeGenerated). The
 // digital-mode equivalent of WSJT-X's Pwr slider: set it while watching ALC.
 // Does not affect voice/mic TX.
-const DIGITAL_TX_GAIN_KEY = 'piro.digitalTxGainDb';
 const digitalTxGainEl = document.getElementById('digital-tx-gain');
 const digitalTxGainBtn = document.getElementById('digital-tx-gain-btn');
 const digitalTxGainPop = document.getElementById('digital-tx-gain-pop');
@@ -5624,16 +5623,15 @@ function syncTxAdjustVisible() {
 // (CIV_MAXIMIZE_USB_LEVELS) you need big cuts to bring ALC down. At rest the
 // control shows just the dB value; tapping it opens a 1 dB slider (like
 // WSJT-X's Pwr) -- compact, and easier than an always-shown slider on mobile.
+// Server-owned: one gain for the single radio, shared across browsers. The
+// confirmed value arrives in the connect snapshot and the DIGITAL_TX_GAIN
+// broadcast (ws-server.js). It is NOT persisted per browser -- a remembered
+// per-device value would fight the server's shared value. 0 (unity) until
+// the server reports otherwise.
 let digitalTxGainDb = 0;
 // Attenuation floor, overwritten from server config on connect (default
 // matches the server's own DIGITAL_TX_GAIN_MIN_DB default).
 let digitalTxGainMinDb = -50;
-try {
-  const saved = Number(localStorage.getItem(DIGITAL_TX_GAIN_KEY));
-  if (Number.isFinite(saved) && saved <= 0 && saved >= -120) digitalTxGainDb = Math.round(saved);
-} catch {
-  // private mode: not remembered
-}
 function fmtTxGain(db) {
   return db < 0 ? `\u2212${-db} dB` : '0 dB';
 }
@@ -5672,21 +5670,24 @@ document.addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !digitalTxGainPop.hidden) closeTxAdjustPop();
 });
-// Live readout + value while dragging; apply (save + tell the server) on release.
+// Live preview while dragging: update only the labels, not the confirmed
+// digitalTxGainDb, so a rejected change can snap back (see 'change').
 digitalTxGainSlider.addEventListener('input', () => {
-  digitalTxGainDb = Number(digitalTxGainSlider.value);
-  const label = fmtTxGain(digitalTxGainDb);
+  const label = fmtTxGain(Number(digitalTxGainSlider.value));
   digitalTxGainReadout.textContent = label;
   digitalTxGainBtn.textContent = label;
 });
+// On release, ask the server to set it. The server owns the value and
+// broadcasts it back (DIGITAL_TX_GAIN), which is what updates
+// digitalTxGainDb -- so if the request is rejected (e.g. PiRO paused for
+// another LAN client) we snap the UI back to the last confirmed value
+// rather than leave the slider showing a gain the radio never adopted.
 digitalTxGainSlider.addEventListener('change', () => {
-  digitalTxGainDb = Number(digitalTxGainSlider.value);
-  try {
-    localStorage.setItem(DIGITAL_TX_GAIN_KEY, String(digitalTxGainDb));
-  } catch {
-    // not remembered
-  }
-  link.request('setDigitalTxGain', { db: digitalTxGainDb }).catch((err) => showError(err.message));
+  const requested = Number(digitalTxGainSlider.value);
+  link.request('setDigitalTxGain', { db: requested }).catch((err) => {
+    showError(err.message);
+    renderDigitalTxGain();
+  });
 });
 // Visible exactly when the PTT button is: the several places that show or
 // hide the PTT button and its section don't each need to know about it.

@@ -14,7 +14,7 @@ Hamlib, no separate audio server and no extra apps.
 Written by VK3TR. Licensed AGPL-3.0-only (see
 [Licence](#licence)).
 
-**Current build: v151.** This is the version the app shows next to its title.
+**Current build: v152.** This is the version the app shows next to its title.
 It is the `CACHE_NAME` number in `src/client/sw.js`, which goes up with every
 change to the web app.
 
@@ -2018,6 +2018,7 @@ All settings are environment variables. For the systemd service they go in
 | `RADE_TX_BIN`, `RADE_RX_BIN`, `LPCNET_DEMO_BIN` | `radae_tx`, `radae_rx`, `lpcnet_demo` | Locations of the FreeDV RADE programs. |
 | `RADE_VERSION` | `v1` | `v1` (stable) or `v2` (under development; both ends must match). |
 | `RADE_TX_GAIN` | `4` | Transmit drive multiplier for RADE. |
+| `DIGITAL_TX_GAIN_MIN_DB` | `-50` | Floor (most-negative dB) of the **TX Adjust** control for generated digital modes (FT8/FT4/WSPR/JS8/RTTY/SSTV/FreeDV/…). Attenuation-only; clamped to `[-120, -1]`. |
 | `FREEDV_REPORTER_ENABLED` | on | `0` or `false` stops any reporting to the FreeDV Reporter. Reporting also needs the "FDV Spot" box ticked in the UI. |
 | `FREEDV_REPORTER_HOST` | public service | Only for testing against your own Reporter server. |
 

@@ -2067,9 +2067,10 @@ button {
   accent-color: var(--led-green);
   cursor: pointer;
 }
-/* TX Adjust scales the whole generated waveform once, at send time, so a
-   change only affects the NEXT transmission -- say so (see audio-bridge.js
-   writeGenerated and app.js). Full-width caption under the slider row. */
+/* Most generated modes build the whole waveform once at send time, so a
+   change applies to the NEXT transmission; FreeDV/RADE streams audio
+   frames, so there it takes effect on the next frame, mid-over (see
+   audio-bridge.js writeGenerated and app.js). Full-width caption. */
 .tx-adjust-pop__note {
   flex-basis: 100%;
   margin: 0;
@@ -2106,6 +2107,7 @@ button {
 .tx-power__value--open {
   outline: 2px solid var(--led-green);
   outline-offset: 1px;
+}
 
 /* Draggable decode-table columns (desktop/wide view only; see
    src/client/table-resize.js). Phones and narrow windows never receive
