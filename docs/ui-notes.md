@@ -5699,35 +5699,6 @@ also in v142.
   gone when the radio answers.
 - Service-worker cache v146.
 
-### Read the SWR/ALC meters during server-driven transmits (v148)
-- **Real bug.** The transmit meters (SWR, ALC, power and the rest) only
-  updated while the on-screen PTT button was held. During a transmit the
-  server drives itself -- FT8/FT4, WSPR, CW text, the CW paddle -- the browser
-  did not poll them, so the meters sat still just when the operator wanted to
-  watch ALC.
-- **Cause.** The meter poll keyed off the local PTT-button state instead of
-  the "on the air for any reason" signal the server already broadcasts.
-- **Now.** The poll uses `isTransmitting()` = `radioTransmitting || pttActive`.
-  `radioTransmitting` follows the `transmitting` event and the connect
-  snapshot (PTT on, an unconfirmed PTT release, the CW paddle keying, CW text
-  going out), so the meters read during any transmit, however it was started.
-- Tests: the meter-mode and S-meter modules keep their unit tests
-  (meter-modes.test.mjs, smeter.test.mjs); the poll-timing change is client UI
-  wiring, checked by watching the meters during an FT8 and a paddle-CW transmit.
-- Service-worker cache v148.
-### Wider desktop layout and draggable decode-table columns (v147)
-- On screens 900 px and wider the panels drop their 640 px max-width and use
-  almost the whole window (a CSS media query; no JavaScript, no user-agent
-  sniffing). Phones and narrow windows are unchanged.
-- The decode tables (FT8/FT4, JTTY, WSPR) get draggable column dividers on
-  those wide screens (src/client/table-resize.js): each column except the
-  last takes an explicit width, the Message column flexes to stay widest, and
-  a faint divider by each header brightens on hover and while dragging. Narrow
-  screens never get the `data-resizable` attribute, so the compact
-  fixed-column layout is untouched.
-- No real bug; both are enhancements.
-- Tests: no automated test for the drag UI (it needs a real browser); checked
-  by eye in a desktop browser. The responsive width is pure CSS.
 ### rigctl port: Hamlib 4.6 clients (v147)
 - **Real bug, found by CI.** GitHub's runners moved to Ubuntu 26.04, which
   installs Hamlib 4.6.5, and rigctl-server.test.js began failing on every
@@ -5751,6 +5722,40 @@ also in v142.
   4.5.5; CI runs 4.6.5.
 - Service-worker cache v147.
 
+### Wider desktop layout and draggable decode-table columns (v147)
+- On screens 900 px and wider the panels drop their 640 px max-width and use
+  almost the whole window (a CSS media query; no JavaScript, no user-agent
+  sniffing). Phones and narrow windows are unchanged.
+- The decode tables (FT8/FT4, JTTY, WSPR) get draggable column dividers on
+  those wide screens (src/client/table-resize.js): each column except the
+  last takes an explicit width, the Message column flexes to stay widest, and
+  a faint divider by each header brightens on hover and while dragging. Narrow
+  screens never get the `data-resizable` attribute, so the compact
+  fixed-column layout is untouched.
+- No real bug; both are enhancements.
+- Tests: no automated test for the drag UI (it needs a real browser); checked
+  by eye in a desktop browser. The responsive width is pure CSS.
+- Service-worker cache v147: merged after the rigctl fix above without a
+  build change of its own, so it shares v147. Phones that already had v147
+  picked up its layout with v148.
+
+### Read the SWR/ALC meters during server-driven transmits (v148)
+- **Real bug.** The transmit meters (SWR, ALC, power and the rest) only
+  updated while the on-screen PTT button was held. During a transmit the
+  server drives itself -- FT8/FT4, WSPR, CW text, the CW paddle -- the browser
+  did not poll them, so the meters sat still just when the operator wanted to
+  watch ALC.
+- **Cause.** The meter poll keyed off the local PTT-button state instead of
+  the "on the air for any reason" signal the server already broadcasts.
+- **Now.** The poll uses `isTransmitting()` = `radioTransmitting || pttActive`.
+  `radioTransmitting` follows the `transmitting` event and the connect
+  snapshot (PTT on, an unconfirmed PTT release, the CW paddle keying, CW text
+  going out), so the meters read during any transmit, however it was started.
+- Tests: the meter-mode and S-meter modules keep their unit tests
+  (meter-modes.test.mjs, smeter.test.mjs); the poll-timing change is client UI
+  wiring, checked by watching the meters during an FT8 and a paddle-CW transmit.
+- Service-worker cache v148.
+
 ### FT8/FT4: send the 4-character grid in CQ and grid-report messages (v149)
 - **Real bug (found on air, 2026-11-19).** With a 6-character Maidenhead grid
   configured (e.g. EM95PC), our own CQ went out as a bare "CQ <call>" -- the
@@ -5773,6 +5778,7 @@ also in v142.
   caller-role Tx2 reply, and `trimMessageGrid()` across CQ, reply, 4-char
   no-op, reports/73, a grid-less CQ, and free text.
 - Service-worker cache v149.
+
 ### TX Adjust: mic-gain hidden in SSTV (v151)
 
 Follow-up to the TX Adjust work. SSTV transmits server-generated tones
