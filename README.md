@@ -14,7 +14,7 @@ Hamlib, no separate audio server and no extra apps.
 Written by VK3TR. Licensed AGPL-3.0-only (see
 [Licence](#licence)).
 
-**Current build: v152.** This is the version the app shows next to its title.
+**Current build: v153.** This is the version the app shows next to its title.
 It is the `CACHE_NAME` number in `src/client/sw.js`, which goes up with every
 change to the web app.
 
@@ -657,6 +657,12 @@ it open now, yours included.
 - Everyone has the same control. Nothing stops two people transmitting at
   once, and two microphones at once garble the audio. Agree who has the
   radio: the notes help.
+- **You hear each other transmit.** In SSB, AM, FM and FreeDV, what one
+  person says into their phone while transmitting is also played in every
+  other browser, as if it were received audio (the radio itself is silent
+  while transmitting). That makes a group net work. You don't hear
+  yourself. It is off in the data modes (FT8, RTTY, SSTV and the rest) and
+  with DATA mode on. To turn it off, set `TX_AUDIO_ECHO=off`.
 - When the last browser closes, PiRO stops any transmission and the
   receivers. Phones disconnect often, so don't rely on a page staying open.
 
@@ -1959,6 +1965,7 @@ All settings are environment variables. For the systemd service they go in
 | `AUDIO_TX_DEVICE` | same as RX | ALSA playback device for transmit audio. |
 | `AUDIO_SAMPLE_RATE` | `48000` | Audio sample rate. |
 | `AUDIO_CHANNELS` | `1` | Number of audio channels. |
+| `TX_AUDIO_ECHO` | on | In SSB, AM, FM and FreeDV, a browser's microphone audio while transmitting is also played in every other browser, so people sharing the radio hear each other. `off` turns it off. |
 | `AUDIO_OPUS_BITRATE` | `24000` | Opus bit rate for compressed audio, in bits per second (6000 to 128000). See [Compressed audio for remote use](#compressed-audio-for-remote-use). `AUDIO_CODEC` is no longer used: each browser chooses. |
 | `SCREEN_TITLE` | `PiRO` | Title shown in the browser tab and on the page (a link to the source, see `SOURCE_CODE_URL`). |
 | `JTTY_TX_FREQ_HZ` | `1450` | Audio frequency of JTTY's lowest tone, in Hz. The signal fills about 94 Hz above it. |
@@ -3196,6 +3203,11 @@ The test files:
                            front-panel changes kept
   cw-stop-client.test.js  client Stop action stays available after an
                            uncertain CW error and resets on confirmed RX
+  tx-echo.test.js         TX echo: the other browsers hear the talker, in
+                           their own formats; the talker doesn't hear
+                           itself; received audio held back while it
+                           flows; only in voice modes and FreeDV; off with
+                           TX_AUDIO_ECHO=off; end to end over WebSocket
   tx-safety.test.js       transmit safety (issues #75-#79), with a stand-in
                            radio that rejects PTT-off: release confirmed or
                            reported; settings put back only once unkeyed

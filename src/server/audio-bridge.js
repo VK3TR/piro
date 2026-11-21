@@ -155,6 +155,12 @@ const MAX_MIC_FRAME_MS = 500;
  * either of these two RX-audio-stream denoisers could conflict with even
  * if they wanted to.
  */
+// App modes that send data, not voice: TX echo is off while any is on (see _isVoiceMode()).
+const DATA_APP_MODES = ['ft8Active', 'jttyActive', 'oliviaActive', 'js8Active', 'hellActive', 'varaActive', 'sstvActive', 'wsprActive', 'faxActive', 'easypalActive'];
+// After the last echoed mic packet, the radio's received audio stays held
+// back this long, so a gap between packets doesn't let it in mid-over.
+const ECHO_HOLD_MS = 300;
+
 class AudioBridge extends EventEmitter {
   constructor(opts) {
     super();
@@ -175,6 +181,7 @@ class AudioBridge extends EventEmitter {
       rnnoiseFilterFactory,
       hamnoiseFilterFactory,
       hamnoiseQuality,
+      txEcho = true,
     } = opts;
 
     if (!controlServer) throw new Error('AudioBridge requires opts.controlServer');
@@ -211,6 +218,11 @@ class AudioBridge extends EventEmitter {
     this._stopping = false;
     this._rxMuted = false;
     this._txMuted = false;
+    // TX echo (TX_AUDIO_ECHO, on by default; see _echoTx()): in a voice
+    // mode, a browser's mic audio also goes to every other browser, so
+    // people sharing the radio hear each other transmit.
+    this.txEcho = txEcho;
+    this._echoUntil = 0; // received audio is held back until then (see _publishRx())
     this._rnnoiseBin = rnnoiseBin || 'rnnoise_demo';
     // The "RNN" button's level->wet mapping. index.js parses the
     // RNNOISE_WET env var (a comma-separated list, e.g.
@@ -530,6 +542,13 @@ class AudioBridge extends EventEmitter {
 
   /** Sends one RX chunk (raw or denoised, whichever this call received) to the browsers unless muted (see setRxMuted()), and emits it as 'rx-pcm' for other server-side listeners — see this class's own doc comment. */
   _publishRx(chunk) {
+    // While a browser's TX audio is being echoed (see _echoTx()), the radio's
+    // received audio (silence, while it transmits) isn't sent: the two would
+    // interleave and pile up in the browsers' players.
+    if (Date.now() < this._echoUntil) {
+      this.emit('rx-pcm', chunk);
+      return;
+    }
     if (this._squelchEnabled) {
       chunk = this._squelchRx(chunk);
       if (!chunk) return; // muted between overs: nothing to send
@@ -645,11 +664,11 @@ class AudioBridge extends EventEmitter {
    * only encoded while some browser wants it; its encoder is dropped when
    * none does, and a fresh one starts when one asks again.
    */
-  broadcastRxAudio(pcm) {
+  broadcastRxAudio(pcm, { except } = {}) {
     let raw = null;
     const wants = new Map();
     for (const ws of this.controlServer.clients ?? []) {
-      if (ws.readyState !== ws.OPEN) continue;
+      if (ws.readyState !== ws.OPEN || ws === except) continue;
       const codec = this._clientCodec.get(ws);
       if (codec) {
         if (!wants.has(codec)) wants.set(codec, []);
@@ -783,6 +802,32 @@ class AudioBridge extends EventEmitter {
     } catch (err) {
       this._reportError('mic', err);
     }
+    if (this.txEcho && this._isVoiceMode()) this._echoTx(pcm, ws);
+  }
+
+  /**
+   * Whether the radio is in a voice mode, where mic audio is speech worth
+   * echoing: LSB, USB, AM or FM with DATA mode off and no data app mode
+   * on (FT8, JTTY, VARA, SSTV and the rest), or FreeDV (digital voice:
+   * the mic audio is the speech, before it is encoded).
+   */
+  _isVoiceMode() {
+    const s = this.controlServer.state || {};
+    if (s.freeDvActive) return true;
+    if (!['LSB', 'USB', 'AM', 'FM'].includes(s.mode?.mode) || s.dataMode) return false;
+    return !DATA_APP_MODES.some((key) => s[key]);
+  }
+
+  /**
+   * TX echo: sends one packet of a browser's mic audio (raw PCM at
+   * `sampleRate`) to every other browser, in each one's own format, as if
+   * it were received audio. The browser transmitting isn't sent its own
+   * voice (it would hear itself late). Holds back the radio's received
+   * audio for ECHO_HOLD_MS after the last packet (see _publishRx()).
+   */
+  _echoTx(pcm, sender) {
+    this._echoUntil = Date.now() + ECHO_HOLD_MS;
+    this.broadcastRxAudio(pcm, { except: sender });
   }
 
   _reportError(context, err) {
@@ -860,7 +905,7 @@ class AudioBridge extends EventEmitter {
   }
 }
 
-module.exports = { AudioBridge, tagAudio, tagFrame };
+module.exports = { AudioBridge, tagAudio, tagFrame, ECHO_HOLD_MS };
 
 /**
  * Prefix a payload with the AUDIO binary-frame type tag (see

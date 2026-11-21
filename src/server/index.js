@@ -61,6 +61,10 @@ const CW_PADDLE_DELAY_MS = (() => {
   return 250;
 })();
 const RADIO_MODEL = process.env.CIV_RADIO_MODEL; // e.g. "IC-7300"
+// TX echo: in a voice mode (SSB, AM, FM or FreeDV), a browser's mic audio
+// is also sent to every other browser, so people sharing the radio hear
+// each other transmit (a group net, say). On unless set to 0/false/off/no.
+const TX_AUDIO_ECHO = !/^(0|false|off|no)$/i.test((process.env.TX_AUDIO_ECHO || '').trim());
 // Hamlib-style control port (rigctl-server.js), for loggers and programs
 // using "Hamlib NET rigctl". Off unless RIGCTL_PORT is set (4532 is
 // Hamlib's usual port). RIGCTL_HOST: 127.0.0.1 (programs on the Pi only)
@@ -552,6 +556,7 @@ async function main() {
       rxDevice: AUDIO_RX_DEVICE,
       txDevice: AUDIO_TX_DEVICE,
       ...(lan ? { capture: civ.capture, playback: civ.playback, maximizeVolumeOnStart: false } : {}),
+      txEcho: TX_AUDIO_ECHO,
       sampleRate: AUDIO_SAMPLE_RATE,
       channels: AUDIO_CHANNELS,
       opusBitrate: AUDIO_OPUS_BITRATE,
