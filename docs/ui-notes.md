@@ -5698,3 +5698,19 @@ also in v142.
   manual-tty-ui.js: the banner in both browsers, below the header, and
   gone when the radio answers.
 - Service-worker cache v146.
+
+### TX Adjust: mic-gain hidden in SSTV (v147)
+
+Follow-up to the TX Adjust work. SSTV transmits server-generated tones
+with the radio forced into DATA MODE, so the browser microphone is never
+in the SSTV transmit path (see sstv-tx-bridge.js) -- the mic-gain control
+did nothing while SSTV was selected. It is now hidden when `sstvActive`
+(re-run from updateSsbChip() so it tracks the mode toggle); TX Adjust is
+the drive control for SSTV.
+
+FreeDV/RADE keeps both controls, because there they do different jobs:
+mic-gain sets the voice level feeding the RADE encoder, and TX Adjust
+sets the drive of the encoded modem waveform (the audio the radio and its
+ALC actually see).
+
+- Client only: app.js. Service-worker cache v147.
