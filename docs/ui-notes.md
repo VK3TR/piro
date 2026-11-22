@@ -6012,6 +6012,35 @@ cancelled with Stop (or errors), the QSO and composer are kept intact so Send
 retries the final reply instead of sending a fresh CQ. Service-worker cache
 v159.
 
+### FT8/FT4 usability: parity-lock, band-change reset, phone polish (v160)
+
+Three conveniences from on-air use, folded in here.
+
+**Transmit-slot parity lock.** FT8/FT4 are strict ping-pong on alternating
+15 s slots, so a reply must land in the opposite parity to the slot the
+partner was heard in. Scheduling each reply opposite the *last* decode meant
+that if the partner's decode wandered parity for a slot (bad clock, or a
+late decode mis-slotted) our own transmit slot flipped with it, breaking the
+sequence. `ft8ParityLockPartner` now locks the reply-slot reference to the
+slot we first heard the partner in and holds it for the QSO -- set when a QSO
+starts (answering a CQ, or someone answering our CQ), only re-set when the
+partner changes, and cleared on a fresh CQ, a band/variant change, leaving
+FT8, or the QSO completing. Frequency still drift-tracks independently.
+
+**Band change resets to CQ.** A real band change mid-session (band chip) left
+the station you were working -- and its staged reply and locked parity -- in
+the composer, so the next send went to a station no longer in front of you.
+A shared `resetFt8QsoToCq()` now clears the table, resets the sequencer,
+drops the parity lock, and refills the composer with the default CQ -- only
+on an actual band change, not the first tune or a same-band re-tune.
+
+**Phone polish.** On narrow screens the fixed UTC/dt/Freq/SNR columns
+squeezed the message column; a scoped `@media (max-width: 560px)` rule drops
+the message onto its own full-width wrapping line. SNR is rounded to 2 dp
+(and its column widened for values like -24.00), and the metadata columns
+are muted so the decoded message reads as the primary content. All scoped to
+`#ft8-table`. Service-worker cache v160.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still

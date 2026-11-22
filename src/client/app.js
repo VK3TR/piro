@@ -4561,9 +4561,31 @@ function exitFt8Mode({ local = false, keepDataMode = false } = {}) {
  * sideband — FT8/FT4 stay on USB on every band (see enterFt8Mode()'s doc
  * comment on why that's correct, unlike FreeDV/voice SSB).
  */
+// Abandons the current guided QSO and returns the composer to a fresh CQ:
+// clears the band-activity table, resets the sequencer, drops the transmit
+// slot-parity lock, hides the QSO status line, and refills the composer with
+// the default CQ. Used when a band change means the station we were working
+// is no longer in front of us (see tuneFt8ToBand).
+function resetFt8QsoToCq() {
+  ft8TableBodyEl.innerHTML = '';
+  ft8Qso.reset();
+  ft8ReplySlotMs = null;
+  ft8ParityLockPartner = null;
+  hideQsoStatus();
+  ft8ComposerInput.value = defaultCqMessage(stationCallsign, stationGrid);
+}
+
 function tuneFt8ToBand(bandName) {
   const hz = ft8FrequencyTable()[bandName];
   if (hz == null) return;
+  // A real band change mid-session leaves behind whatever station we were
+  // working: abandon the guided QSO and fall back to calling CQ so a stale
+  // reply (and its locked transmit-slot parity) can't follow us to the new
+  // band. Not on the first tune when entering FT8 (ft8LastBandName is null),
+  // nor on a re-tune to the same band (e.g. a variant switch).
+  if (ft8LastBandName != null && bandName !== ft8LastBandName) {
+    resetFt8QsoToCq();
+  }
   ft8LastBandName = bandName;
   link
     .request('setFrequency', { value: hz })
@@ -4595,6 +4617,8 @@ function toggleFt8Variant() {
 
   ft8TableBodyEl.innerHTML = '';
   ft8Qso.reset();
+  ft8ReplySlotMs = null;
+  ft8ParityLockPartner = null;
   hideQsoStatus();
 
   if (ft8LastBandName && ft8FrequencyTable()[ft8LastBandName] != null) {
@@ -4991,6 +5015,8 @@ function setFt8UiVisible(active) {
     // next time FT8 mode is entered.
     ft8Qso.reset();
     callAlert.reset();
+    ft8ReplySlotMs = null;
+    ft8ParityLockPartner = null;
     hideQsoStatus();
     currentQsoFreqHz = null;
     scopeDisplay.setQsoFreq(null);
@@ -5043,6 +5069,11 @@ function formatUtcTime(ms) {
 // station is listening in (see sendFt8Message() and ft8-bridge.js).
 // null for a fresh CQ or a manual send with no specific station.
 let ft8ReplySlotMs = null;
+// The station our transmit-slot parity is locked to for the current QSO.
+// Set when a QSO starts (answering a CQ, or someone answering our CQ) and
+// held until it ends or a fresh CQ goes out, so a later decode that wanders
+// parity can't flip which slot we transmit in. null = no lock.
+let ft8ParityLockPartner = null;
 link.addEventListener('ft8-decodes', (event) => {
   const { slotStartMs, messages } = event.detail || {};
   ft8SlotTimeEl.textContent = slotStartMs != null ? `slot ${formatUtcTime(slotStartMs)}Z` : '—';
@@ -5101,7 +5132,7 @@ link.addEventListener('ft8-decodes', (event) => {
     const freq = document.createElement('span');
     freq.textContent = typeof msg.freq === 'number' ? `${Math.round(msg.freq)}Hz` : '—';
     const snr = document.createElement('span');
-    snr.textContent = typeof msg.snr === 'number' ? `${msg.snr > 0 ? '+' : ''}${msg.snr}` : '—';
+    snr.textContent = typeof msg.snr === 'number' ? `${msg.snr > 0 ? '+' : ''}${msg.snr.toFixed(2)}` : '—';
     const text = document.createElement('span');
     text.textContent = msg.msg || '';
     row.append(utc, dt, freq, snr, text);
@@ -5132,7 +5163,15 @@ link.addEventListener('ft8-decodes', (event) => {
         // re-engage -- that would copy the decoded message over our reply.
         // Re-apply the staged reply (in case the composer was touched), lock
         // the reply-slot parity to the slot we heard them in, and send ours.
-        if (slotStartMs != null) ft8ReplySlotMs = slotStartMs;
+        // Lock our reply-slot parity to the slot we FIRST heard this partner
+        // in: only (re)set it when the partner changes (a new QSO). On later
+        // rounds the parity stays locked, so a decode that wanders parity
+        // can't flip our transmit slot. See ft8ParityLockPartner.
+        const partner = activeQso && activeQso.partnerCall;
+        if (partner && partner !== ft8ParityLockPartner) {
+          if (slotStartMs != null) ft8ReplySlotMs = slotStartMs;
+          ft8ParityLockPartner = partner;
+        }
         applyFt8Suggestion(qsoAdvanced);
         sendFt8Message();
         return;
@@ -5194,6 +5233,8 @@ link.addEventListener('ft8-tx-status', (event) => {
     if (status === 'sent') {
       ft8FinalResetPending = null;
       ft8Qso.reset();
+      ft8ReplySlotMs = null;
+      ft8ParityLockPartner = null;
       currentQsoFreqHz = ft8DefaultTxFreqHz;
       scopeDisplay.setQsoFreq(currentQsoFreqHz);
       hideQsoStatus();
@@ -5224,14 +5265,20 @@ function engageFt8Row(msg, slotStartMs) {
   if (slotStartMs != null) ft8ReplySlotMs = slotStartMs;
   const engaged = ft8Qso.engage(msg);
   if (engaged) {
+    // Starting (or re-engaging) a QSO: lock our transmit-slot parity to the
+    // slot we heard this station in and hold it for the QSO's life, so a
+    // later decode that wanders parity can't flip our transmit slot.
+    ft8ParityLockPartner = engaged.partnerCall;
     applyFt8Suggestion(engaged);
     ft8ComposerInput.focus();
     return true; // a real guided reply (answer a CQ / reply-to-our-CQ) is staged
   }
   // No guided response for this row -- engage() only *starts* a QSO (from a
   // CQ or a reply to our CQ); mid-QSO it returns null. Copy the decode in for
-  // manual editing, but report it as NOT sendable so a double-click can't
-  // transmit an arbitrary received message.
+  // manual editing (a one-off reply opposite this slot, no QSO and no parity
+  // lock), but report it as NOT sendable so a double-click can't transmit an
+  // arbitrary received message.
+  ft8ParityLockPartner = null;
   ft8ComposerInput.value = msg.msg || '';
   ft8ComposerInput.focus();
   return false;
@@ -5283,8 +5330,10 @@ function sendFt8Message() {
     currentQsoFreqHz = ft8DefaultTxFreqHz;
     scopeDisplay.setQsoFreq(currentQsoFreqHz);
     hideQsoStatus();
-    // A fresh CQ isn't answering anyone -- let it go at the next boundary.
+    // A fresh CQ isn't answering anyone -- let it go at the next boundary,
+    // and drop any QSO parity lock (this starts a new sequence).
     ft8ReplySlotMs = null;
+    ft8ParityLockPartner = null;
   }
 
   // currentQsoFreqHz targets this transmission at the frequency the
