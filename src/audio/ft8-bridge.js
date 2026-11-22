@@ -415,6 +415,14 @@ class Ft8Bridge {
    */
   send(message, { freqHz, replySlotMs } = {}) {
     return new Promise((resolve, reject) => {
+      // A new send() supersedes any still-queued message: settle and clear it
+      // up front, BEFORE encoding the replacement below, so a replacement that
+      // then fails to encode can't leave the superseded message queued to
+      // transmit at its boundary (it used to be overwritten before encoding).
+      if (this._pendingTxMessage) {
+        this._pendingTxMessage.reject(new Error('superseded by a newer transmission'));
+        this._pendingTxMessage = null;
+      }
       // FT8/FT4 are strict ping-pong on alternating slots: a reply must
       // land in the slot the answered station is *listening* in (the
       // opposite parity to the slot we heard it in) or it never reaches

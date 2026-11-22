@@ -416,19 +416,19 @@ async function run() {
     // A second send() before the first has gone out should replace it,
     // not queue both.
     const { bridge, slotClock, controlServer } = makeBridge();
-    // Note: the superseded first promise is intentionally left unsettled
-    // by the bridge (its resolve/reject are simply discarded when
-    // replaced) — attach a no-op handler so it doesn't surface as an
-    // unhandled-rejection warning, but don't await it, since it never
-    // settles.
+    // The superseded first message is now settled (rejected as superseded)
+    // the moment the replacement is accepted, BEFORE the replacement is
+    // encoded -- so even a replacement that fails to encode cannot leave the
+    // old message queued to transmit at its boundary.
     const first = bridge.send('FIRST MESSAGE HERE');
-    first.catch(() => {});
-    first.then(() => {});
+    let firstRejected = null;
+    first.catch((err) => { firstRejected = err; });
     bridge.send('SECOND MESSAGE HERE');
     slotClock.fireBoundary(15000);
     await flush();
     const sendingEvents = controlServer.broadcasts.filter((b) => b.type === EVENT.FT8_TX_STATUS && b.data.status === 'sending');
     check(sendingEvents.length === 1 && sendingEvents[0].data.message === 'SECOND MESSAGE HERE', 'a second send() before the first goes out replaces it rather than queuing both');
+    check(firstRejected !== null && /superseded/.test(firstRejected.message), 'the superseded first message is settled (rejected), not left queued to transmit');
     bridge.stop();
   }
 
