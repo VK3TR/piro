@@ -5932,3 +5932,14 @@ second LAN client. Service-worker cache v152.
   from [REMOTE]). The FT8 section, the Voice section and troubleshooting
   link to it.
 - Service-worker cache v154.
+
+### FT8/FT4: double-click a decode row to send (v156)
+
+Double-click a row in the FT8/FT4 activity table to send that message as the
+next transmission -- the point-and-click way to answer a CQ or continue an
+exchange without retyping. It keys off the native `dblclick` event, which a
+touchscreen does not fire, so on a phone/tablet a **tap stages** the message
+and the Send button highlights instead; you tap Send to transmit. No device
+detection, and a mouse/trackpad double-click still sends.
+
+- Client only: app.js. Service-worker cache v156.
