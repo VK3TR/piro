@@ -5923,4 +5923,12 @@ second LAN client. Service-worker cache v152.
   worker. The rest of manual-tty-ui.js stops at the JTTY Send step here,
   on main too, so that part is not from this change.
 - Not tested with a real oauth2-proxy or WordPress site.
+- **Radio settings in the install steps (docs only).** README step 5 listed
+  only the CI-V settings. It now lists the radio's audio and USB settings
+  that PiRO can't change over CI-V: DATA OFF MOD (MIC,USB, needed for the
+  browser's microphone in voice modes; it wasn't documented anywhere),
+  DATA MOD (USB), the USB levels, ACC/USB Output Select (AF), USB SEND OFF
+  (Linux raises DTR and RTS when the port opens) and CI-V USB Port (Unlink
+  from [REMOTE]). The FT8 section, the Voice section and troubleshooting
+  link to it.
 - Service-worker cache v154.

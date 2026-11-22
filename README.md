@@ -185,12 +185,40 @@ because it adds the groups itself. You need it to run PiRO by hand.)
 sudo usermod -a -G dialout,audio $USER
 ```
 
-**5. Set up the radio.** In the radio's menu:
+<a id="radio-settings"></a>
+**5. Set up the radio.** PiRO can't change these over CI-V, so set them on
+the radio. The menu names are the IC-7300's; other Icom radios have
+similar ones.
 
-- Note the **CI-V USB Baud Rate**. PiRO's `CIV_BAUD_RATE` must match it. The
+CI-V (Menu > Set > Connectors > CI-V):
+
+- **CI-V USB Port**: **Unlink from [REMOTE]**, so the USB port uses its
+  own baud rate below.
+- **CI-V USB Baud Rate**: PiRO's `CIV_BAUD_RATE` must match it. The
   default is 19200. Scope use usually needs 115200.
-- Turn **CI-V Transceive** ON.
-- Note the **CI-V Address** (0x94 is the IC-7300 factory default).
+- **CI-V Transceive**: ON.
+- **CI-V Address**: note it (0x94 is the IC-7300 factory default).
+
+Audio (Menu > Set > Connectors):
+
+- **MOD Input > DATA OFF MOD**: **MIC,USB**. This lets the browser's
+  microphone transmit in SSB, AM and FM. Without it the radio keys up but
+  sends its own microphone, not yours. With MIC,USB the radio's
+  front-panel microphone is live too, so anything it hears in the shack
+  goes on the air with the remote operator. Choose **USB** instead if
+  nobody uses the radio's own microphone.
+- **MOD Input > DATA MOD**: **USB**. Needed for FT8, RTTY, SSTV and every
+  other data mode. Without it the radio keys up but sends nothing.
+- **MOD Input > USB MOD Level** and **ACC/USB Output Select > AF Output
+  Level**: PiRO sets both to maximum when it starts. Set
+  `CIV_MAXIMIZE_USB_LEVELS=false` to keep your own.
+- **ACC/USB Output Select**: **AF** (the default), so the received audio
+  reaches PiRO.
+- **USB SEND/Keying > USB SEND**: **OFF** (the default). Linux raises the
+  serial port's DTR and RTS lines when PiRO opens it. If USB SEND used one
+  of them, the radio could transmit as soon as PiRO starts.
+- **USB SEND/Keying > USB Keying (CW)**: OFF, unless you use the CW
+  paddle. See [CW](#cw).
 
 **6. Connect the radio and find its devices.**
 
@@ -860,7 +888,8 @@ RS-BA1 or other programs. Not tested on air.
 #### Voice: SSB, AM and FM
 
 Pick **SSB**, **AM** or **FM**, tap **Speaker**, and use **PUSH TO TALK**.
-The microphone needs HTTPS. Set **Mic** so your audio drives the radio
+The microphone needs HTTPS, and the radio's **DATA OFF MOD** must be
+MIC,USB or USB ([radio settings](#radio-settings)). Set **Mic** so your audio drives the radio
 properly: tap the meter's title until it says **ALC**, then talk and watch
 it.
 
@@ -1602,7 +1631,7 @@ Two things must be right for FT8 to work:
   yes".
 - On an IC-7300, Menu > Set > Connectors > MOD Input > **DATA MOD** must be
   **USB**. PiRO can't change this over CI-V. Without it the radio keys up
-  but sends nothing.
+  but sends nothing. See [step 5 of Installing PiRO](#radio-settings).
 
 #### WSPR
 
@@ -2212,12 +2241,17 @@ one hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac).
   build. Re-do the check in [RNNoise](#rnnoise-rnn-button).
 - **The server runs at 100% CPU after turning HamNoise on.** Make sure
   `HAMNOISE_QUALITY` is not set to `v2` on a Raspberry Pi.
+- **Voice transmits, but the other station hears the radio's own
+  microphone (or nothing), not the browser's.** On the radio, Menu > Set >
+  Connectors > MOD Input > **DATA OFF MOD** must be **MIC,USB** or
+  **USB**. See [the radio settings](#radio-settings).
 - **A digital transmission (FT8, RTTY, JTTY, Olivia, JS8, VARA, Feld-Hell, SSTV) keys
   the radio but shows no power.** The radio's display should read USB-D or
   LSB-D while it transmits; PiRO turns DATA mode on with CI-V `1A 06`
   (before v78 it sent the wrong command, so DATA mode never came on). Then
   check on the radio: Menu > Set > Connectors > MOD Input > **DATA MOD**
-  must be **USB**, and USB MOD Level not 0. If it only happens sometimes,
+  must be **USB**, and USB MOD Level not 0 (see
+  [the radio settings](#radio-settings)). If it only happens sometimes,
   update to v80 or later: PTT used to follow the DATA mode command so
   closely that the radio could transmit from the microphone instead. PiRO
   now confirms DATA mode, and waits for it to take, before keying. A
