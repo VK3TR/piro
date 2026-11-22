@@ -5038,6 +5038,7 @@ function applyFt8Suggestion(suggestion) {
 // engage()) more than once before the send.
 const FT8_DBLCLICK_MS = 250;
 let ft8RowClickTimer = null;
+let ft8PendingRowMsg = null; // the row waiting on the double-click timer
 function copyFt8RowToComposer(msg) {
   // Guided engagement first: a CQ (or a reply to our own CQ, to pick a
   // specific caller out of a pileup) prefills the appropriate next
@@ -5110,9 +5111,12 @@ link.addEventListener('ft8-decodes', (event) => {
       // timer lets a double-click pre-empt it, so a double-click doesn't
       // run the copy twice before it sends.
       if (ft8RowClickTimer) clearTimeout(ft8RowClickTimer);
+      ft8PendingRowMsg = msg;
       ft8RowClickTimer = setTimeout(() => {
         ft8RowClickTimer = null;
-        copyFt8RowToComposer(msg);
+        const pending = ft8PendingRowMsg;
+        ft8PendingRowMsg = null;
+        if (pending) copyFt8RowToComposer(pending);
       }, FT8_DBLCLICK_MS);
     });
     row.addEventListener('dblclick', () => {
@@ -5121,6 +5125,7 @@ link.addEventListener('ft8-decodes', (event) => {
         clearTimeout(ft8RowClickTimer);
         ft8RowClickTimer = null;
       }
+      ft8PendingRowMsg = null;
       copyFt8RowToComposer(msg);
       sendFt8Message();
     });
@@ -5160,7 +5165,23 @@ link.addEventListener('ft8-tx-status', (event) => {
   if (gridTrimNote) ft8StatusEl.textContent += ' \u2014 grid trimmed to 4 chars (FT8 limit)';
 });
 
+// A single row-click stages its message on a short double-click timer (see the
+// row 'click' handler). If the operator presses Send before that timer fires,
+// apply the pending selection first so we send the row they picked, not the
+// previous composer contents.
+function flushPendingRowSelection() {
+  if (ft8RowClickTimer) {
+    clearTimeout(ft8RowClickTimer);
+    ft8RowClickTimer = null;
+  }
+  if (ft8PendingRowMsg) {
+    const pending = ft8PendingRowMsg;
+    ft8PendingRowMsg = null;
+    copyFt8RowToComposer(pending);
+  }
+}
 function sendFt8Message() {
+  flushPendingRowSelection();
   const typed = ft8ComposerInput.value.trim().toUpperCase();
   if (!typed) return;
   // A standard FT8 message carries only a 4-char grid; trim a typed
