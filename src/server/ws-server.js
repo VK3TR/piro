@@ -9,6 +9,7 @@ const { EventEmitter } = require('events');
 const { WebSocketServer } = require('ws');
 const { REQUEST, EVENT, BINARY_TYPE, makeResult, makeError, makeEvent } = require('./protocol');
 const { createStaticHandler } = require('./static-server');
+const { checkLogin, isLoopback } = require('./login-proxy');
 
 // Operator notes (REQUEST.POST_NOTE)
 const NOTES_KEEP = 3;
@@ -168,6 +169,7 @@ class ControlServer extends EventEmitter {
   constructor({
     civ,
     port = 8080,
+    host,
     staticDir,
     tls,
     screenTitle,
@@ -184,10 +186,21 @@ class ControlServer extends EventEmitter {
     allowedOrigins = [],
     notesIdleMs = NOTES_IDLE_MS,
     notesEmptyGraceMs = NOTES_EMPTY_GRACE_MS,
+    idleLogout = { minutes: 0, url: null },
+    requireLogin = false,
   }) {
     super();
     this.civ = civ;
     this.port = port;
+    // The address to listen on (WS_HOST): all of the Pi's addresses unless
+    // set, e.g. 127.0.0.1 behind a login proxy so the app can only be
+    // reached through it.
+    this.host = host || null;
+    // LOGIN_PROXY: every request must come through the login proxy on this
+    // Pi with a signed-in user (see login-proxy.js). Off: no login at all.
+    this.requireLogin = !!requireLogin;
+    if (this.requireLogin && !this.host) this.host = '127.0.0.1';
+    if (this.requireLogin && !isLoopback(this.host)) throw new Error(`With the login on, PiRO must listen on loopback, not ${this.host}`);
     this.tls = tls ?? null;
     // Fail-safe transmission cutoff: default 10 minutes, per the
     // Australian amateur class licence's condition on remote/computer
@@ -240,6 +253,15 @@ class ControlServer extends EventEmitter {
 
     const staticHandler = staticDir ? createStaticHandler(staticDir) : null;
     const requestHandler = (req, res) => {
+      if (this.requireLogin) {
+        const login = checkLogin(req);
+        if (!login.ok) {
+          console.warn(`[http] refused ${req.method} ${req.url}: ${login.reason}`);
+          res.writeHead(401, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+          res.end('Login required\n');
+          return;
+        }
+      }
       if (staticHandler) {
         // Belt and braces: nothing a browser sends should be able to throw
         // out of here and take the server (and the radio's PTT) down.
@@ -262,6 +284,14 @@ class ControlServer extends EventEmitter {
       server: this.httpServer,
       maxPayload: maxMessageBytes,
       verifyClient: ({ origin, req }) => {
+        if (this.requireLogin) {
+          const login = checkLogin(req, { websocket: true });
+          if (!login.ok) {
+            console.warn(`[ws] refused a connection: ${login.reason}`);
+            return false;
+          }
+          req.loginUser = login.user;
+        }
         if (originAllowed(origin, req.headers.host, this.allowedOrigins)) return true;
         console.warn(`[ws] refused a connection from origin ${origin} (Host: ${req.headers.host}); see ALLOWED_ORIGINS`);
         return false;
@@ -492,6 +522,10 @@ class ControlServer extends EventEmitter {
       cwKeying: false, // the CW paddle is keying (EVENT.CW_KEYING); see cw-paddle-bridge.js
       transmitting: false, // the radio is, or may be, transmitting (EVENT.TRANSMITTING); see ControlServer#transmitting
       lanControl: { active: false, client: null }, // a LAN client has the radio and PiRO is paused (EVENT.LAN_CONTROL); see pause()
+      // Idle logout (IDLE_LOGOUT_MINUTES / IDLE_LOGOUT_URL): after `minutes`
+      // without a tap, click or key, the browser closes its connection and
+      // goes to `url` (a login proxy's sign-out). 0: off.
+      idleLogout: { minutes: idleLogout?.minutes || 0, url: idleLogout?.url || null },
       radioAnswering: true, // false while the radio isn't answering CI-V (EVENT.RADIO_ANSWERING; CivDriver 'answering')
     };
     this.cwPaddle = null; // set by CwPaddleBridge#start()
@@ -526,8 +560,13 @@ class ControlServer extends EventEmitter {
   }
 
   _wireWsConnections() {
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
       this.clients.add(ws);
+      if (req?.loginUser) {
+        ws.loginUser = req.loginUser;
+        console.log(`[ws] ${req.loginUser} connected`);
+        ws.once('close', () => console.log(`[ws] ${req.loginUser} disconnected`));
+      }
       if (this._notesEmptyTimer) {
         clearTimeout(this._notesEmptyTimer);
         this._notesEmptyTimer = null;
@@ -1695,11 +1734,14 @@ class ControlServer extends EventEmitter {
     ]);
 
     return new Promise((resolve) => {
-      this.httpServer.listen(this.port, () => {
+      const done = () => {
         const addr = this.httpServer.address();
         this.port = typeof addr === 'object' && addr ? addr.port : this.port;
+        this.boundAddress = typeof addr === 'object' && addr ? addr.address : null;
         resolve(this.port);
-      });
+      };
+      if (this.host) this.httpServer.listen(this.port, this.host, done);
+      else this.httpServer.listen(this.port, done);
     });
   }
 

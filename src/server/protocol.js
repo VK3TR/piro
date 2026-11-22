@@ -144,7 +144,7 @@ const EVENT = {
   PTT_TIMEOUT: 'ptt-timeout', // broadcast when the PTT watchdog force-releases TX — see ws-server.js
   CW_TEXT: 'cw-text', // broadcast per decoded CW character/word-space — see cw-decoder-bridge.js
   RTTY_TEXT: 'rtty-text', // broadcast per decoded RTTY (Baudot/ITA2) character — see rtty-decoder-bridge.js
-  CONNECTED: 'connected', // sent once to a newly-connected client with a full state snapshot, plus clients: how many browsers are connected (this one included)
+  CONNECTED: 'connected', // sent once to a newly-connected client with a full state snapshot, plus clients: how many browsers are connected (this one included). The snapshot's idleLogout {minutes, url} (IDLE_LOGOUT_MINUTES, IDLE_LOGOUT_URL; minutes 0: off) tells the browser to log out after that long with no input: it closes its connection and goes to url. See client/idle-logout.js. With LOGIN_PROXY on, the WebSocket is only accepted on / with a signed-in user from the login proxy (401 otherwise); see server/login-proxy.js
   CLIENTS: 'clients', // broadcast when a browser connects or disconnects: {count}, how many browsers are connected now. Shown in brackets after "Connected" at the top right
   RIG_ERROR: 'rig-error', // broadcast when the CI-V driver reports a hardware/serial error
   AUDIO_ERROR: 'audio-error', // broadcast when the audio pipeline (ALSA/Opus) hits an error

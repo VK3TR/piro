@@ -14,7 +14,7 @@ Hamlib, no separate audio server and no extra apps.
 Written by VK3TR. Licensed AGPL-3.0-only (see
 [Licence](#licence)).
 
-**Current build: v153.** This is the version the app shows next to its title.
+**Current build: v154.** This is the version the app shows next to its title.
 It is the `CACHE_NAME` number in `src/client/sw.js`, which goes up with every
 change to the web app.
 
@@ -28,12 +28,14 @@ This README has two parts:
 [Credits](#credits) and the [Licence](#licence) are at the end.
 
 ## Warning!
-Note that it DOES NOT include any form of login or password - so don't present it to the big bad internet or some rando will start controlling your rig! Always put it behind a firewall or VPN.
+Out of the box PiRO has NO login or password - so don't present it to the big bad internet or some rando will start controlling your rig! Always put it behind a firewall or VPN, or turn on the login (`LOGIN_PROXY`, below).
 
 PiRO does accept the WebSocket only from its own page, so another web site
 open in a browser on your network can't reach the radio through it. If
 you put PiRO behind a reverse proxy that changes the host name, see
 `ALLOWED_ORIGINS` in the [Configuration reference](#configuration-reference).
+To let people in from the internet, put a login in front of it: see
+[Access from the internet with a login](#access-from-the-internet-with-a-login).
 
 ---
 
@@ -183,12 +185,40 @@ because it adds the groups itself. You need it to run PiRO by hand.)
 sudo usermod -a -G dialout,audio $USER
 ```
 
-**5. Set up the radio.** In the radio's menu:
+<a id="radio-settings"></a>
+**5. Set up the radio.** PiRO can't change these over CI-V, so set them on
+the radio. The menu names are the IC-7300's; other Icom radios have
+similar ones.
 
-- Note the **CI-V USB Baud Rate**. PiRO's `CIV_BAUD_RATE` must match it. The
+CI-V (Menu > Set > Connectors > CI-V):
+
+- **CI-V USB Port**: **Unlink from [REMOTE]**, so the USB port uses its
+  own baud rate below.
+- **CI-V USB Baud Rate**: PiRO's `CIV_BAUD_RATE` must match it. The
   default is 19200. Scope use usually needs 115200.
-- Turn **CI-V Transceive** ON.
-- Note the **CI-V Address** (0x94 is the IC-7300 factory default).
+- **CI-V Transceive**: ON.
+- **CI-V Address**: note it (0x94 is the IC-7300 factory default).
+
+Audio (Menu > Set > Connectors):
+
+- **MOD Input > DATA OFF MOD**: **MIC,USB**. This lets the browser's
+  microphone transmit in SSB, AM and FM. Without it the radio keys up but
+  sends its own microphone, not yours. With MIC,USB the radio's
+  front-panel microphone is live too, so anything it hears in the shack
+  goes on the air with the remote operator. Choose **USB** instead if
+  nobody uses the radio's own microphone.
+- **MOD Input > DATA MOD**: **USB**. Needed for FT8, RTTY, SSTV and every
+  other data mode. Without it the radio keys up but sends nothing.
+- **MOD Input > USB MOD Level** and **ACC/USB Output Select > AF Output
+  Level**: PiRO sets both to maximum when it starts. Set
+  `CIV_MAXIMIZE_USB_LEVELS=false` to keep your own.
+- **ACC/USB Output Select**: **AF** (the default), so the received audio
+  reaches PiRO.
+- **USB SEND/Keying > USB SEND**: **OFF** (the default). Linux raises the
+  serial port's DTR and RTS lines when PiRO opens it. If USB SEND used one
+  of them, the radio could transmit as soon as PiRO starts.
+- **USB SEND/Keying > USB Keying (CW)**: OFF, unless you use the CW
+  paddle. See [CW](#cw).
 
 **6. Connect the radio and find its devices.**
 
@@ -679,6 +709,62 @@ note, or two minutes after the last browser closes. Browsers only play
 sound once the page has been tapped, and a phone that is locked or has the
 browser in the background usually won't chime at all.
 
+#### Access from the internet with a login
+
+PiRO has no login unless you turn one on. To open it to a group, such as
+club members, put a login proxy in front of it and set `LOGIN_PROXY=on`.
+[oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) works: it
+signs people in through the club's web site (for example a WordPress site
+with an OAuth or OpenID Connect server plugin) and only then passes them
+to PiRO, WebSocket included. A web server such as Caddy in front of it
+provides HTTPS, which the microphone needs.
+
+With `LOGIN_PROXY` on, the login is mandatory:
+
+- PiRO listens on this Pi only (127.0.0.1), so only a proxy on the same
+  Pi can reach it.
+- Every page, file and WebSocket needs the signed-in user that the proxy
+  passes on (`X-Forwarded-User` or `X-Forwarded-Email`). Without one PiRO
+  answers 401 "Login required". The log shows who connects.
+- The only page without a login is the "Logged out" page.
+- PiRO won't start with a setting that leaves a way round the login:
+  `WS_HOST` other than 127.0.0.1, or the rigctl port open to other
+  computers (`RIGCTL_HOST`). The Icom LAN server has its own username and
+  password.
+
+On the Pi, in `/etc/piro/piro.env`:
+
+```bash
+LOGIN_PROXY=on
+# Log out after this many minutes with no taps, clicks or keys
+# (60 unless set; off for none).
+#IDLE_LOGOUT_MINUTES=60
+```
+
+Leave `TLS_CERT_PATH` and `TLS_KEY_PATH` unset: the web server in front
+does HTTPS. In oauth2-proxy's config:
+
+```toml
+upstreams = ["http://127.0.0.1:8080/"]   # PiRO's WS_PORT
+pass_user_headers = true                  # the default: PiRO needs them
+# The page shown after an idle logout must load without a login.
+skip_auth_routes = ["GET=^/logged-out\\.html$"]
+```
+
+- **Idle logout.** With the login on, a browser with no taps, clicks or
+  keys for an hour (`IDLE_LOGOUT_MINUTES`) shows a warning for the last
+  minute, then closes its connection and goes to oauth2-proxy's sign-out
+  (`IDLE_LOGOUT_URL`). That ends with a "Logged out" page. Its **Log in
+  again** button goes back to PiRO through the login. If the person is
+  still signed in to the club web site, they come straight back in.
+- **An expired login.** When the WebSocket keeps failing, PiRO checks
+  whether a login is needed. If so, it reloads the page, and the proxy
+  shows its sign-in page.
+- Don't forward the Icom LAN server ports to the internet unless you
+  mean to: its own password is its only protection.
+- If the proxy changes the `Host` header, set `ALLOWED_ORIGINS` to the
+  address members browse to.
+
 #### Other programs: the rigctl port
 
 PiRO can answer the same commands as Hamlib's `rigctld`, so a logger or
@@ -802,7 +888,8 @@ RS-BA1 or other programs. Not tested on air.
 #### Voice: SSB, AM and FM
 
 Pick **SSB**, **AM** or **FM**, tap **Speaker**, and use **PUSH TO TALK**.
-The microphone needs HTTPS. Set **Mic** so your audio drives the radio
+The microphone needs HTTPS, and the radio's **DATA OFF MOD** must be
+MIC,USB or USB ([radio settings](#radio-settings)). Set **Mic** so your audio drives the radio
 properly: tap the meter's title until it says **ALC**, then talk and watch
 it.
 
@@ -1544,7 +1631,7 @@ Two things must be right for FT8 to work:
   yes".
 - On an IC-7300, Menu > Set > Connectors > MOD Input > **DATA MOD** must be
   **USB**. PiRO can't change this over CI-V. Without it the radio keys up
-  but sends nothing.
+  but sends nothing. See [step 5 of Installing PiRO](#radio-settings).
 
 #### WSPR
 
@@ -1961,6 +2048,10 @@ All settings are environment variables. For the systemd service they go in
 | `CIV_SCOPE_ENABLED` | off | `true` turns on the spectrum scope and waterfall. |
 | `CIV_MAXIMIZE_USB_LEVELS` | on | At start-up, sets the radio's USB audio levels to maximum. `0` or `false` leaves them alone. |
 | `WS_PORT` | `8080` | Port for the web app and its WebSocket. |
+| `LOGIN_PROXY` | off | `on` makes a login mandatory, through a login proxy on this Pi such as oauth2-proxy: PiRO listens on 127.0.0.1 only and refuses any request without a signed-in user. See [Access from the internet with a login](#access-from-the-internet-with-a-login). Off: no login. |
+| `WS_HOST` | all | The address the web app listens on. Unset: every address the Pi has, or 127.0.0.1 with `LOGIN_PROXY` on. With the login on, nothing else is allowed. |
+| `IDLE_LOGOUT_MINUTES` | `60` with the login on | With `LOGIN_PROXY` on: after this many minutes (1 to 1440) with no taps, clicks or keys, a browser warns for a minute, then closes its connection and goes to `IDLE_LOGOUT_URL`. `off` or `0`: no idle logout. Ignored with the login off. |
+| `IDLE_LOGOUT_URL` | `/oauth2/sign_out?rd=%2Flogged-out.html` | Where an idle logout goes: oauth2-proxy's sign-out, then PiRO's "Logged out" page. Must start with `/` or `http(s)://`. |
 | `AUDIO_RX_DEVICE` | none | ALSA capture device, such as `plughw:CODEC,0`. Audio and all decoders are off without it. |
 | `AUDIO_TX_DEVICE` | same as RX | ALSA playback device for transmit audio. |
 | `AUDIO_SAMPLE_RATE` | `48000` | Audio sample rate. |
@@ -2128,6 +2219,17 @@ one hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac).
   page. Behind a reverse proxy that changes the `Host` header, add the
   address in the browser's address bar to `ALLOWED_ORIGINS`, such as
   `ALLOWED_ORIGINS=https://radio.example.net`.
+- **After an idle logout, the sign-in page shows instead of "Logged
+  out".** The login proxy needs `/logged-out.html` without a login: add
+  `skip_auth_routes = ["GET=^/logged-out\\.html$"]` to oauth2-proxy's config.
+- **With `LOGIN_PROXY` on, the page says "Login required".** PiRO didn't
+  get a signed-in user. The proxy must be on the same Pi, point at
+  `http://127.0.0.1:` and PiRO's `WS_PORT` (8080 unless set), and pass
+  the user on (oauth2-proxy's `pass_user_headers`, on by default). The log
+  says why each request was refused.
+- **With `LOGIN_PROXY` on, PiRO won't start: "Login settings: ...".**
+  `WS_HOST` or `RIGCTL_HOST` would let people in without the login. Use
+  127.0.0.1, or leave them unset.
 - **The service restarts over and over.** Look at `journalctl -u piro`. "The
   serial port ... closed unexpectedly" or an error opening the port means
   the radio is off or its USB is unplugged: PiRO keeps trying until it is
@@ -2139,12 +2241,17 @@ one hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac).
   build. Re-do the check in [RNNoise](#rnnoise-rnn-button).
 - **The server runs at 100% CPU after turning HamNoise on.** Make sure
   `HAMNOISE_QUALITY` is not set to `v2` on a Raspberry Pi.
+- **Voice transmits, but the other station hears the radio's own
+  microphone (or nothing), not the browser's.** On the radio, Menu > Set >
+  Connectors > MOD Input > **DATA OFF MOD** must be **MIC,USB** or
+  **USB**. See [the radio settings](#radio-settings).
 - **A digital transmission (FT8, RTTY, JTTY, Olivia, JS8, VARA, Feld-Hell, SSTV) keys
   the radio but shows no power.** The radio's display should read USB-D or
   LSB-D while it transmits; PiRO turns DATA mode on with CI-V `1A 06`
   (before v78 it sent the wrong command, so DATA mode never came on). Then
   check on the radio: Menu > Set > Connectors > MOD Input > **DATA MOD**
-  must be **USB**, and USB MOD Level not 0. If it only happens sometimes,
+  must be **USB**, and USB MOD Level not 0 (see
+  [the radio settings](#radio-settings)). If it only happens sometimes,
   update to v80 or later: PTT used to follow the DATA mode command so
   closely that the radio could transmit from the microphone instead. PiRO
   now confirms DATA mode, and waits for it to take, before keying. A
@@ -2334,7 +2441,8 @@ browser. There is no build step: the browser loads plain ES modules.
 - **The client** (`src/client/`): `app.js` is the whole UI. `rpc.js`
   (RigLink) wraps the WebSocket and re-dispatches every server event as a
   DOM event. `audio.js` plays and records with Web Audio. `scope.js` draws
-  the spectrum and waterfall. `sw.js` caches the app for offline start.
+  the spectrum and waterfall. `sw.js` caches the app for offline start;
+  page loads go to the network first, so a login proxy can redirect them.
 
 [`docs/architecture.drawio`](docs/architecture.drawio) is a UML diagram of
 the main classes and how they connect: browser client, server, feature
@@ -2375,8 +2483,12 @@ is a preview of the first page.
   browser needn't be near the radio.
 - Audio uses the radio's own USB codec through ALSA: no extra sound card
   or virtual audio cable.
-- There is no login. Remote use is expected over a VPN. PiRO compresses
-  audio for such links.
+- There is no login unless `LOGIN_PROXY` is on. Then it is mandatory:
+  every way in needs it (`src/server/login-proxy.js`), and a setting that
+  would leave a way round it stops PiRO at startup. A new listening port
+  must stay on loopback with the login on, or have its own login. Without
+  the login, remote use is expected over a VPN. PiRO compresses audio for
+  such links.
 
 `docs/civ-notes.md` has the CI-V command history and corrections, and is
 worth reading before changing anything in `src/civ/`.
@@ -2424,7 +2536,8 @@ src/
                          WebAssembly), xara/xara.js, vara-worker.js
               tty-bridge.js sends RTTY, JTTY, Olivia and Feld-Hell.
   client/     the PWA: index.html, styles.css, app.js (the whole UI),
-              rpc.js (RigLink), audio.js, mic-capture-processor.js,
+              rpc.js (RigLink), login-check.js, idle-logout.js,
+              logged-out.html, audio.js, mic-capture-processor.js,
               audio-codec.js (shared with the server), scope.js, smeter.js,
               vswr.js, ft8-qso.js, sw.js, manifest and icons
 test/         *.test.js and *.test.mjs (npm test), manual-*.js (see Testing)
@@ -2778,6 +2891,14 @@ change the mode) are refused with "Can't change that while transmitting."
 snapshot) is broadcast when the radio stops answering CI-V (several
 requests in a row timed out, none answered for 30 s) and when it answers
 again; requests are still tried meanwhile.
+The `connected` snapshot's `idleLogout` (`{minutes, url}`, from
+`IDLE_LOGOUT_MINUTES` and `IDLE_LOGOUT_URL`; `minutes` 0 is off) tells the
+browser to close its connection and go to `url` after that long with no
+input.
+With `LOGIN_PROXY` on, every HTTP request and the WebSocket need a
+signed-in user from the login proxy (`X-Forwarded-User` or
+`X-Forwarded-Email`) and must come from this Pi; the WebSocket is only
+accepted on `/`. Anything else gets 401.
 `lan-control` (`{active, client}`, also `lanControl` in the `connected`
 snapshot) is broadcast when a program on the Icom LAN server takes or
 gives back the radio; while active, every request is refused with
@@ -3094,6 +3215,16 @@ The test files:
   static-server.test.js   static file server tests: content types, 404s,
                            path-traversal protection, malformed URLs (400,
                            server keeps running)
+  login-proxy.test.js     the login: off by default (no login needed);
+                           with LOGIN_PROXY on, loopback only, 401 without
+                           a signed-in user, the logged-out page the only
+                           exception, WebSocket only on /, unsafe settings
+                           refused; WS_HOST; idleLogout in the snapshot;
+                           the service worker (page loads from the network
+                           first, cache offline, /oauth2/ never handled)
+  idle-logout.test.mjs    the browser's idle logout with a fake clock
+                           (warning, tap, logout once, a phone that slept)
+                           and its login check after failed connects
   tls-server.test.js      confirms the server actually works over
                            HTTPS/WSS when TLS_CERT_PATH/TLS_KEY_PATH are set
   lan-paddle-preparation.test.js  native CW cold preparation, scheduled edges and preparation cancellation
@@ -3330,7 +3461,9 @@ The test files:
   jtty-decoder-bridge.test.js  JTTY receive bridge: arming, PTT, decimation,
                            backlog dropping, broadcasts
   manual-tty-ui.js        optional browser test of the TTY button, text box and
-                           Send/Stop (needs Playwright and Chromium)
+                           Send/Stop, the idle logout, and an expired login
+                           behind a stand-in login proxy (needs Playwright
+                           and Chromium)
   manual-audio-ui.js      optional browser test of compressed audio: three
                            browsers on full, Opus (WebCodecs) and ADPCM, RX
                            played, the fake microphone sent in each format,
