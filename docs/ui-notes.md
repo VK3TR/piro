@@ -5961,3 +5961,20 @@ already-encoded audio with no encode on the critical path.
   ws-server.js. Client: app.js (remembers the answered decode's slot
   and sends replySlotMs). Test: ft8-bridge.test.js.
 - Service-worker cache v154.
+
+### FT8/FT4: double-click a decode row to send (v156)
+
+Builds on the existing click-to-engage guided QSO: a **single click** still
+engages (prefills the next message / tracks the QSO), but it is now deferred
+on a short (250 ms) timer so a **double-click** can pre-empt it and **send
+right away** -- the point-and-click way to answer a CQ or fire off a reply.
+
+- Keys off the native `dblclick` event, which a touchscreen does not fire, so
+  on a phone/tablet a **tap stages** the message (the Send button pulses via
+  applyFt8Suggestion) and you tap Send to transmit. No device detection; a
+  mouse/trackpad double-click still sends.
+- The single-click engage is factored into `engageFt8Row()`, shared by the
+  dblclick handler. If Send is pressed inside the 250 ms window, the pending
+  row selection is **flushed first** (flushPendingRowSelection), so Send uses
+  the row the operator picked, not the previous composer contents.
+- Client only: app.js. Service-worker cache v156.

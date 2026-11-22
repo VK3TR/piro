@@ -5092,22 +5092,27 @@ link.addEventListener('ft8-decodes', (event) => {
     text.textContent = msg.msg || '';
     row.append(utc, dt, freq, snr, text);
     row.addEventListener('click', () => {
-      // Guided engagement first — clicking a CQ (or, to pick a specific
-      // caller out of a pileup, a reply to our own CQ) prefills the
-      // appropriate next message in the standard FT8 exchange and tracks
-      // the QSO (see ft8-qso.js). Anything engage() doesn't recognize
-      // falls back to the original plain copy-into-composer behavior.
-      // Remember which slot this decode came from, so the reply is
-      // scheduled in the opposite parity slot the station is listening
-      // in (see sendFt8Message() -> replySlotMs, and ft8-bridge.js).
-      if (slotStartMs != null) ft8ReplySlotMs = slotStartMs;
-      const engaged = ft8Qso.engage(msg);
-      if (engaged) {
-        applyFt8Suggestion(engaged);
-      } else {
-        ft8ComposerInput.value = msg.msg || '';
+      // Single click: guided engagement (engageFt8Row), deferred on a short
+      // timer so a double-click can pre-empt it and send right away.
+      if (ft8RowClickTimer) clearTimeout(ft8RowClickTimer);
+      ft8PendingRowSel = { msg, slotStartMs };
+      ft8RowClickTimer = setTimeout(() => {
+        ft8RowClickTimer = null;
+        const sel = ft8PendingRowSel;
+        ft8PendingRowSel = null;
+        if (sel) engageFt8Row(sel.msg, sel.slotStartMs);
+      }, FT8_DBLCLICK_MS);
+    });
+    row.addEventListener('dblclick', () => {
+      // Double click (desktop/trackpad; touch does not fire it): engage and
+      // send immediately.
+      if (ft8RowClickTimer) {
+        clearTimeout(ft8RowClickTimer);
+        ft8RowClickTimer = null;
       }
-      ft8ComposerInput.focus();
+      ft8PendingRowSel = null;
+      engageFt8Row(msg, slotStartMs);
+      sendFt8Message();
     });
     ft8TableBodyEl.appendChild(row);
   }
@@ -5145,7 +5150,49 @@ link.addEventListener('ft8-tx-status', (event) => {
   if (gridTrimNote) ft8StatusEl.textContent += ' \u2014 grid trimmed to 4 chars (FT8 limit)';
 });
 
+// --- Double-click a decode row to send --------------------------------------
+// A single click engages the guided QSO (or copies the message); a
+// double-click sends it right away. Keyed off the native dblclick event,
+// which a touchscreen does not fire, so on a phone/tablet a tap stages the
+// message (the Send button pulses) and you tap Send to transmit -- no device
+// detection, and a mouse/trackpad double-click still sends.
+const FT8_DBLCLICK_MS = 250;
+let ft8RowClickTimer = null;
+let ft8PendingRowSel = null; // {msg, slotStartMs} staged by a single click, pending the dblclick timer
+
+// The guided engagement a single click runs, factored out so the dblclick
+// handler and the pending-selection flush can reuse it.
+function engageFt8Row(msg, slotStartMs) {
+  // Remember which slot this decode came from, so the reply is scheduled in
+  // the opposite parity slot the station is listening in (see
+  // sendFt8Message() -> replySlotMs, and ft8-bridge.js).
+  if (slotStartMs != null) ft8ReplySlotMs = slotStartMs;
+  const engaged = ft8Qso.engage(msg);
+  if (engaged) {
+    applyFt8Suggestion(engaged);
+  } else {
+    ft8ComposerInput.value = msg.msg || '';
+  }
+  ft8ComposerInput.focus();
+}
+
+// A single row-click stages its selection on the double-click timer; if Send
+// is pressed before it fires, apply the pending selection first so Send uses
+// the row the operator picked, not the previous composer contents.
+function flushPendingRowSelection() {
+  if (ft8RowClickTimer) {
+    clearTimeout(ft8RowClickTimer);
+    ft8RowClickTimer = null;
+  }
+  if (ft8PendingRowSel) {
+    const sel = ft8PendingRowSel;
+    ft8PendingRowSel = null;
+    engageFt8Row(sel.msg, sel.slotStartMs);
+  }
+}
+
 function sendFt8Message() {
+  flushPendingRowSelection();
   const typed = ft8ComposerInput.value.trim().toUpperCase();
   if (!typed) return;
   // A standard FT8 message carries only a 4-char grid; trim a typed
