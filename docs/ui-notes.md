@@ -6056,6 +6056,22 @@ back to the raw copy-into-composer. `_startFromCq` now delegates to a shared
 `_startCalling`, so answering a CQ and calling a heard station build the same
 message. Client only (ft8-qso.js, app.js). Service-worker cache v161.
 
+### FT8/FT4 usability: review round-2 fixes (v162)
+
+Three follow-up correctness fixes from review:
+- **startCalling validates the sender.** `parseFt8Message` sets `fromCall` to
+  the second token even for free text ("TNX FER QSO" -> "FER"), which staged a
+  call to a non-station. startCalling now requires `fromCall` to match the
+  callsign pattern; anything else stays on the non-auto-send copy fallback.
+- **Pending row-click cleared on reset.** A single click defers engaging on a
+  250 ms timer; a band/variant change or leaving FT8 within that window used
+  to let the stale callback engage the old decode after the session reset.
+  The reset paths now clear the pending selection and its timer.
+- **Deferred final reset bound to its QSO.** The final-RR73/73 wrap-up is
+  deferred to 'sent'; if the operator engaged a new QSO meanwhile, that match
+  (on message text) reset the NEW QSO. It now also checks the active QSO is
+  still the one that sent the final before resetting. Service-worker cache v162.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still
