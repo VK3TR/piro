@@ -5993,7 +5993,16 @@ so it marks the row once per exchange rather than every slot the QSO is live,
 and the scroll nudge won't fight a manual scroll between replies.
 
 - Client only: `app.js` (marks the advancing row, scrolls it into view),
-  `styles.css` (the green `--selected` row). Service-worker cache v157.
+  `styles.css` (the green `--selected` row).
+
+Review fix (v158): double-clicking the highlighted partner reply now sends
+**our staged response**, not the decoded message on the row. `engage()` only
+returns a reply for a CQ or a reply-to-our-CQ, so mid-QSO (a report, an
+R-report, RR73) it returned null and the old double-click fell back to
+copying the *received* text into the composer and transmitting it. The
+advancing row now sends the sequencer's already-staged reply, and any other
+row only auto-sends when engage() produced a real guided reply -- otherwise
+the decode is just staged for the operator to confirm with Send. Service-worker cache v158.
 
 ### FT8/FT4: double-click a decode row to send (v156)
 

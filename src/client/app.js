@@ -5118,15 +5118,29 @@ link.addEventListener('ft8-decodes', (event) => {
       }, FT8_DBLCLICK_MS);
     });
     row.addEventListener('dblclick', () => {
-      // Double click (desktop/trackpad; touch does not fire it): engage and
-      // send immediately.
+      // Double click (desktop/trackpad; touch does not fire it): send the
+      // guided reply right away.
       if (ft8RowClickTimer) {
         clearTimeout(ft8RowClickTimer);
         ft8RowClickTimer = null;
       }
       ft8PendingRowSel = null;
-      engageFt8Row(msg, slotStartMs);
-      sendFt8Message();
+      if (advancedRow) {
+        // This is the partner's reply that already advanced the sequence this
+        // slot, so OUR response is staged (applyFt8Suggestion on qsoAdvanced).
+        // engage() would return null here (it only starts a QSO), so DON'T
+        // re-engage -- that would copy the decoded message over our reply.
+        // Re-apply the staged reply (in case the composer was touched), lock
+        // the reply-slot parity to the slot we heard them in, and send ours.
+        if (slotStartMs != null) ft8ReplySlotMs = slotStartMs;
+        applyFt8Suggestion(qsoAdvanced);
+        sendFt8Message();
+        return;
+      }
+      // Any other row: only auto-send when engaging produced a real guided
+      // reply (a CQ answer / reply-to-our-CQ). If engage() had no response it
+      // just stages the decode for the operator to confirm with Send.
+      if (engageFt8Row(msg, slotStartMs)) sendFt8Message();
     });
     ft8TableBodyEl.appendChild(row);
   }
@@ -5195,10 +5209,16 @@ function engageFt8Row(msg, slotStartMs) {
   const engaged = ft8Qso.engage(msg);
   if (engaged) {
     applyFt8Suggestion(engaged);
-  } else {
-    ft8ComposerInput.value = msg.msg || '';
+    ft8ComposerInput.focus();
+    return true; // a real guided reply (answer a CQ / reply-to-our-CQ) is staged
   }
+  // No guided response for this row -- engage() only *starts* a QSO (from a
+  // CQ or a reply to our CQ); mid-QSO it returns null. Copy the decode in for
+  // manual editing, but report it as NOT sendable so a double-click can't
+  // transmit an arbitrary received message.
+  ft8ComposerInput.value = msg.msg || '';
   ft8ComposerInput.focus();
+  return false;
 }
 
 // A single row-click stages its selection on the double-click timer; if Send
