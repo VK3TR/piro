@@ -5931,4 +5931,33 @@ second LAN client. Service-worker cache v152.
   (Linux raises DTR and RTS when the port opens) and CI-V USB Port (Unlink
   from [REMOTE]). The FT8 section, the Voice section and troubleshooting
   link to it.
+### FT8/FT4 correct-slot scheduling + boundary-time transmit (v155)
+
+Two related fixes to how a reply is scheduled and transmitted, so an
+on-air QSO actually completes:
+
+- **Correct slot parity.** FT8/FT4 are strict ping-pong on alternating
+  15 s slots: a reply has to land in the slot the answered station is
+  *listening* in (the opposite parity to the slot we heard it in) or it
+  never reaches them. SEND_FT8 now carries the slot being answered
+  (replySlotMs); the bridge schedules the transmission in the matching
+  parity slot (SlotClock#nextSlotStartWithParity / #slotParity) and the
+  boundary handler only fires it in that slot. A fresh CQ / manual send
+  (no replySlotMs) goes at the next boundary, any parity, as before.
+- **Transmit on the boundary, not ~0.5 s late.** The waveform (encode +
+  12k->48k resample, ~0.5 s on a Pi 4) is now pre-built in send() while
+  the current slot is still idle, instead of at the slot boundary in
+  _transmitNow(). Doing it at the boundary delayed the actual start of
+  transmission by that much, so our transmitted DT (time offset) ran
+  badly late in every receiver -- a very plausible reason earlier on-air
+  attempts failed to decode. A message that can't be encoded now rejects
+  up front and never keys the radio.
+
+The two carry together on one queued-TX record: the boundary handler
+fires it in the correct parity slot, and _transmitNow writes the
+already-encoded audio with no encode on the critical path.
+
+- Server: ft8-bridge.js, slot-clock.js, protocol.js (replySlotMs),
+  ws-server.js. Client: app.js (remembers the answered decode's slot
+  and sends replySlotMs). Test: ft8-bridge.test.js.
 - Service-worker cache v154.
