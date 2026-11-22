@@ -5263,7 +5263,12 @@ function engageFt8Row(msg, slotStartMs) {
   // the opposite parity slot the station is listening in (see
   // sendFt8Message() -> replySlotMs, and ft8-bridge.js).
   if (slotStartMs != null) ft8ReplySlotMs = slotStartMs;
-  const engaged = ft8Qso.engage(msg);
+  // A CQ (or a reply to our own CQ) engages the guided QSO; failing that,
+  // startCalling() treats a click on any other station we heard (one working
+  // someone else) as "work this station" and stages our first call to them,
+  // "THEIRCALL MYCALL GRID". Only a row that is neither -- free text with no
+  // callsign -- falls through to the plain copy below.
+  const engaged = ft8Qso.engage(msg) || ft8Qso.startCalling(msg);
   if (engaged) {
     // Starting (or re-engaging) a QSO: lock our transmit-slot parity to the
     // slot we heard this station in and hold it for the QSO's life, so a

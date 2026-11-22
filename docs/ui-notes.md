@@ -6041,6 +6041,21 @@ the message onto its own full-width wrapping line. SNR is rounded to 2 dp
 are muted so the decoded message reads as the primary content. All scoped to
 `#ft8-table`. Service-worker cache v160.
 
+### FT8/FT4: click a busy station to call it (v161)
+
+Clicking a decode row for a station that is not calling CQ and not answering
+us -- one station working another -- used to drop the raw message onto the
+send line (or, mid-QSO, be ignored). Neither was useful. Now such a click
+means "I want to work this station": a new `Ft8QsoSequencer.startCalling()`
+composes our standard first call to that row's sender, "THEIRCALL MYCALL
+GRID" (e.g. clicking `TT1GD K8ZP FM17` stages `K8ZP W4PFI EM95`) and tracks
+them as the partner, so the operator can wait for them to finish their
+current QSO and then send. Clicking a CQ, or a reply addressed to us, still
+engages exactly as before; only free text / telemetry with no callsign falls
+back to the raw copy-into-composer. `_startFromCq` now delegates to a shared
+`_startCalling`, so answering a CQ and calling a heard station build the same
+message. Client only (ft8-qso.js, app.js). Service-worker cache v161.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still
