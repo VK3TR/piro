@@ -765,6 +765,13 @@ skip_auth_routes = ["GET=^/logged-out\\.html$"]
 - If the proxy changes the `Host` header, set `ALLOWED_ORIGINS` to the
   address members browse to.
 
+[`docs/login-wordpress.md`](docs/login-wordpress.md) is a step-by-step
+guide for a WordPress site with the OpenID Connect Server plugin, with
+oauth2-proxy and Caddy on the Pi. It includes a WordPress snippet
+([`deploy/wordpress/piro-login.php`](deploy/wordpress/piro-login.php)) and
+an oauth2-proxy config
+([`deploy/oauth2-proxy.cfg.example`](deploy/oauth2-proxy.cfg.example)).
+
 #### Other programs: the rigctl port
 
 PiRO can answer the same commands as Hamlib's `rigctld`, so a logger or
@@ -2549,9 +2556,13 @@ docs/
   audio-notes.md      the audio pipeline (PCM and Opus, levels)
   pwa-notes.md        HTTPS, certificates, installing to a home screen
   install-debian.md   the install steps with more explanation
+  login-wordpress.md  members' login through a WordPress site (OpenID
+                      Connect Server plugin, oauth2-proxy, Caddy)
   architecture.drawio UML class diagram and event-wiring table (draw.io)
   architecture.png    preview of the class diagram
-deploy/       piro.service (systemd unit) and piro.env.example
+deploy/       piro.service (systemd unit), piro.env.example,
+              oauth2-proxy.cfg.example and wordpress/piro-login.php
+              (members' login; see docs/login-wordpress.md)
 models/       bundled DeepCW and HamNoise models, with their licences
 third_party/  notes, licences and test harnesses for the ported code;
               xara/ also builds xara.wasm (build-wasm.sh)

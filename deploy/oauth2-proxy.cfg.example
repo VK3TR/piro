@@ -1,0 +1,24 @@
+# oauth2-proxy for PiRO, signing in through a WordPress site with the
+# OpenID Connect Server plugin. See docs/login-wordpress.md.
+# Change the lines marked CHANGE.
+
+http_address = "127.0.0.1:4180"   # Caddy passes requests here
+reverse_proxy = true              # trust Caddy's X-Forwarded-* headers
+upstreams = ["http://127.0.0.1:8080/"]   # PiRO's WS_PORT
+
+provider = "oidc"
+provider_display_name = "the club web site"
+oidc_issuer_url = "https://club.example.org/"   # CHANGE: the WordPress address, with the final /
+client_id = "piro"
+client_secret = "CHANGE: the secret in piro-login.php"
+redirect_url = "https://radio.example.org/oauth2/callback"   # CHANGE: same as in piro-login.php
+scope = "openid profile"          # the plugin offers only these; "email" would be refused
+email_domains = ["*"]             # members use any email provider
+
+cookie_secret = "CHANGE: see docs/login-wordpress.md"
+cookie_secure = true
+
+# Go straight to the club's login page, without oauth2-proxy's own button.
+skip_provider_button = true
+# The page shown after an idle logout must load without a login.
+skip_auth_routes = ["GET=^/logged-out\\.html$"]
