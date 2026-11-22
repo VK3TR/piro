@@ -9,6 +9,8 @@
 // app just wants "connected or not" plus a stream of events — it
 // shouldn't have to know about retry logic.
 
+import { shouldCheck, checkLogin } from './login-check.js';
+
 // Mirrors src/server/protocol.js's BINARY_TYPE.
 const BINARY_TYPE = {
   AUDIO: 0x01,
@@ -101,6 +103,8 @@ export class RigLink extends EventTarget {
     this._pending = new Map();
     this._reconnectDelayMs = 2000;
     this._closedByUser = false;
+    this._failedConnects = 0; // closes since the last successful open
+    this._lastLoginCheckAt = null;
   }
 
   connect() {
@@ -121,7 +125,10 @@ export class RigLink extends EventTarget {
 
     this._dispatch('connecting');
 
+    let opened = false;
     ws.addEventListener('open', () => {
+      opened = true;
+      this._failedConnects = 0;
       this.connected = true;
       this._dispatch('open');
     });
@@ -138,14 +145,27 @@ export class RigLink extends EventTarget {
       this.connected = false;
       this._rejectAllPending(new Error('Connection closed'));
       this._dispatch('close');
-      if (!this._closedByUser) {
-        setTimeout(() => this._open(), this._reconnectDelayMs);
-      }
+      if (this._closedByUser) return;
+      if (!opened) this._failedConnects++;
+      setTimeout(() => this._open(), this._reconnectDelayMs);
+      this._maybeCheckLogin();
     });
 
     ws.addEventListener('error', () => {
       ws.close();
     });
+  }
+
+  /** See login-check.js: reload when a login proxy says the login expired. */
+  async _maybeCheckLogin() {
+    const now = Date.now();
+    if (!shouldCheck(this._failedConnects, this._lastLoginCheckAt, now)) return;
+    this._lastLoginCheckAt = now;
+    if (await checkLogin()) {
+      this._closedByUser = true;
+      this._dispatch('login-needed');
+      location.reload();
+    }
   }
 
   _handleJsonMessage(raw) {

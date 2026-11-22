@@ -5861,7 +5861,77 @@ second LAN client. Service-worker cache v152.
   audio, squelch, FreeDV and mic tests pass unchanged.
 - Not tested with real phones on a net, and not tested on air.
 - Service-worker cache v153.
-### FT8/FT4 correct-slot scheduling + boundary-time transmit (v154)
+
+### Members' login: mandatory when on, expired logins, idle logout (v154)
+- **New (requested).** A club wants members to reach its PiRO from the
+  internet, signed in through the club's WordPress site with oauth2-proxy
+  in front. The rule: with no setting PiRO works with no login, as before;
+  once the login is on, it is mandatory. No logout link and no limits on
+  who may transmit: the club asked for neither.
+- **`LOGIN_PROXY`** (off unless set; login-proxy.js). When on:
+  - PiRO listens on 127.0.0.1 only. ControlServer refuses any other
+    address.
+  - Every HTTP request and the WebSocket must come from loopback and carry
+    the signed-in user the proxy passes on (`X-Forwarded-User` or
+    `X-Forwarded-Email`). Otherwise 401 "Login required", logged with the
+    reason. PiRO logs who connects and leaves.
+  - Only `GET /logged-out.html` needs no login, and the WebSocket is only
+    accepted on `/`. The proxy lets that page through without a login, and
+    a request it lets through may carry a user header the client made up,
+    so a WebSocket on that path must not count.
+  - PiRO won't start with `WS_HOST` other than loopback, or the rigctl
+    port (no login) open to other computers. The Icom LAN server has its
+    own username and password.
+- **`WS_HOST`.** The address PiRO listens on. Unset: every address, as
+  before, or 127.0.0.1 with the login on. The startup log shows it.
+- **Expired logins.** The service worker answered page loads from its
+  cache, so a member whose login had expired got PiRO's page from the cache,
+  and the WebSocket (refused by the proxy) failed for ever: "Connecting…"
+  with no way to log in. Now page loads go to the network first and use
+  the cache only offline. `/oauth2/` paths, `/logged-out.html` and the
+  login check are never handled. After two failed connects in a row,
+  RigLink fetches `/manifest.webmanifest?auth-check` without following
+  redirects (at most every 30 s). A redirect, 401 or 403 means a login is
+  needed, so the page reloads and the proxy shows its sign-in page
+  (login-check.js).
+- **Idle logout**, with the login on only: `IDLE_LOGOUT_MINUTES` (60 unless
+  set; `off` for none) and `IDLE_LOGOUT_URL` (default oauth2-proxy's
+  `/oauth2/sign_out?rd=%2Flogged-out.html`) go to the browser in the
+  connect snapshot (`idleLogout`). A tap, click, key or scroll restarts the
+  count. In the last minute a banner says "Logging out in N s". Then the
+  page stops its audio, closes the connection and goes to the URL. Time
+  is measured by the clock, so a phone that slept logs out when it wakes
+  (idle-logout.js). The new `logged-out.html` is standalone, so the proxy
+  can serve it without a login (`skip_auth_routes`). Without it, single
+  sign-on would log the member straight back in.
+- **A real bug, found by the UI test.** IdleLogout's default timer was
+  `setInterval` itself, called as a method of the object. Browsers throw
+  "Illegal invocation" for that (Node doesn't), so the timer never ran.
+  It now wraps the call.
+- Tests: login-proxy.test.js (new): login off needs nothing; with it on,
+  loopback only, 401 for pages and the WebSocket without a user, the
+  logged-out page allowed, a forged user on a WebSocket to that page
+  refused, the user known to the server; unsafe settings listed; WS_HOST
+  binding; idleLogout in the snapshot; sw.js run in a vm (page loads
+  network first, the cache offline, the proxy's paths never handled, app
+  files still cache first). idle-logout.test.mjs (new): the warning, a
+  tap, one logout, a slept phone, short limits, turning it off; the login
+  check's decisions. manual-tty-ui.js: a real idle logout at 0.1 minutes,
+  and PiRO with the login on behind a stand-in proxy: its own port
+  answers 401, through the proxy it connects with the user, and when the
+  login expires the page reloads to the sign-in page through the service
+  worker. The rest of manual-tty-ui.js stops at the JTTY Send step here,
+  on main too, so that part is not from this change.
+- Not tested with a real oauth2-proxy or WordPress site.
+- **Radio settings in the install steps (docs only).** README step 5 listed
+  only the CI-V settings. It now lists the radio's audio and USB settings
+  that PiRO can't change over CI-V: DATA OFF MOD (MIC,USB, needed for the
+  browser's microphone in voice modes; it wasn't documented anywhere),
+  DATA MOD (USB), the USB levels, ACC/USB Output Select (AF), USB SEND OFF
+  (Linux raises DTR and RTS when the port opens) and CI-V USB Port (Unlink
+  from [REMOTE]). The FT8 section, the Voice section and troubleshooting
+  link to it.
+### FT8/FT4 correct-slot scheduling + boundary-time transmit (v155)
 
 Two related fixes to how a reply is scheduled and transmitted, so an
 on-air QSO actually completes:

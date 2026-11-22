@@ -5,6 +5,7 @@ import { ScopeDisplay } from './scope.js';
 import { METER_MODES, METER_TITLES, METER_SEGMENTS, nextMeterMode, shownMeter, meterLegend, meterReading } from './meter-modes.js';
 import { Ft8QsoSequencer, isRelatedToQso, defaultCqMessage, trimMessageGrid } from './ft8-qso.js';
 import { initColumnResize } from './table-resize.js';
+import { IdleLogout } from './idle-logout.js';
 
 // --- Service worker: only register in a secure context (https:, or
 // http://localhost). See docs/pwa-notes.md for why plain http on a LAN
@@ -1057,6 +1058,7 @@ link.addEventListener('connected', (event) => {
   radioTransmitting = !!data.transmitting;
   setLanControl(data.lanControl);
   setRadioAnswering(data.radioAnswering);
+  idleLogout.configure(data.idleLogout);
   if (data.screenTitle) {
     document.title = data.screenTitle;
     if (appTitleLinkEl) appTitleLinkEl.textContent = data.screenTitle;
@@ -6741,6 +6743,32 @@ let lanControl = { active: false, client: null };
 function pausedMessage() {
   return `Paused: ${lanControl.client || 'a LAN client'} has control of the radio over the LAN.`;
 }
+// Idle logout (the server's IDLE_LOGOUT_MINUTES; off unless set). Any tap,
+// click, key or scroll in this browser counts as activity. See
+// idle-logout.js.
+const idleLine = document.getElementById('idle-line');
+const idleLogout = new IdleLogout({
+  onWarn(secondsLeft) {
+    idleLine.textContent = `No activity. Logging out in ${secondsLeft} s. Tap anywhere to stay logged in.`;
+    idleLine.hidden = false;
+  },
+  onClearWarn() {
+    idleLine.hidden = true;
+    idleLine.textContent = '';
+  },
+  onLogout(url) {
+    if (audioPipeline) {
+      audioPipeline.stopTransmitting();
+      audioPipeline.disableSpeaker();
+    }
+    link.disconnect();
+    location.href = url;
+  },
+});
+for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+  window.addEventListener(type, () => idleLogout.activity(), { capture: true, passive: true });
+}
+
 function setLanControl(value) {
   lanControl = { active: !!value?.active, client: value?.client || null };
   pausedLine.hidden = !lanControl.active;

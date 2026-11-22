@@ -1536,6 +1536,102 @@ class Civ extends EventEmitter {
     check(bad.length === 0, 'the second browser sent no radio or mode commands of its own' + (bad.length ? ': ' + bad.map((r) => JSON.stringify(r)).join(' ') : ''));
   }
 
+  // Idle logout (IDLE_LOGOUT_MINUTES), on its own server: 0.1 min, so the
+  // warning shows after 3 s and the logout comes at 6 s.
+  {
+    const idleServer = new ControlServer({ civ: new Civ(), port: 0, staticDir: PKG + '/src/client', idleLogout: { minutes: 0.1, url: '/logged-out.html' } });
+    const idlePort = await idleServer.listen();
+    const pageI = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+    pageI.on('pageerror', (e) => errors.push('idle: ' + e.message));
+    await pageI.goto(`http://localhost:${idlePort}/`);
+    await pageI.waitForFunction(() => document.getElementById('led-text').textContent === 'Connected', null, { timeout: 8000 });
+    const banner = () => pageI.evaluate(() => { const el = document.getElementById('idle-line'); return el.hidden ? '' : el.textContent; });
+    check((await banner()) === '', 'idle logout: no warning at first');
+    await sleep(3600);
+    check(/Logging out in \d+ s/.test(await banner()), `idle logout: a warning before the logout ("${await banner()}")`);
+    await pageI.mouse.click(5, 5);
+    check((await banner()) === '', 'idle logout: a tap clears the warning');
+    await sleep(3600);
+    check(/Logging out/.test(await banner()), 'idle logout: the warning comes back after the limit, counted from the tap');
+    await pageI.waitForURL(/\/logged-out\.html$/, { timeout: 5000 });
+    check(true, 'idle logout: the page goes to the logout URL');
+    const gone = await (async () => { for (let i = 0; i < 20 && idleServer.clients.size; i++) await sleep(100); return idleServer.clients.size === 0; })();
+    check(gone, 'idle logout: the browser closed its connection');
+    check(await pageI.getByRole('link', { name: 'Log in again' }).isVisible(), 'idle logout: the page offers "Log in again"');
+    await pageI.close();
+    await idleServer.close();
+  }
+
+  // An expired login behind a login proxy: a stand-in for oauth2-proxy that
+  // passes everything to PiRO until the login "expires", then redirects
+  // pages to its sign-in page and refuses the WebSocket. The page should
+  // notice and reload, and the service worker must let the redirect through.
+  {
+    const http = require('http');
+    const net = require('net');
+    // PiRO with LOGIN_PROXY on: it needs the signed-in user the proxy adds.
+    const proxyServer = new ControlServer({ civ: new Civ(), port: 0, staticDir: PKG + '/src/client', requireLogin: true });
+    const piroPort = await proxyServer.listen();
+    let expired = false;
+    const tunnels = new Set();
+    const proxy = http.createServer((req, res) => {
+      if (req.url.startsWith('/oauth2/sign_in')) {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        return res.end('<!DOCTYPE html><title>Sign in</title><h1>Sign in</h1>');
+      }
+      if (expired) {
+        res.writeHead(302, { location: '/oauth2/sign_in?rd=' + encodeURIComponent(req.url) });
+        return res.end();
+      }
+      const up = http.request({ host: '127.0.0.1', port: piroPort, path: req.url, method: req.method, headers: { ...req.headers, 'x-forwarded-user': 'vk3abc' } }, (r) => {
+        res.writeHead(r.statusCode, r.headers);
+        r.pipe(res);
+      });
+      req.pipe(up);
+    });
+    proxy.on('upgrade', (req, socket, head) => {
+      if (expired) return socket.end('HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\n\r\n');
+      const up = net.connect(piroPort, '127.0.0.1', () => {
+        const headers = { ...req.headers, 'x-forwarded-user': 'vk3abc' };
+        up.write(`${req.method} ${req.url} HTTP/1.1\r\n` + Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n');
+        up.write(head);
+        up.pipe(socket);
+        socket.pipe(up);
+      });
+      tunnels.add(socket).add(up);
+      const drop = () => { up.destroy(); socket.destroy(); };
+      socket.on('error', drop); up.on('error', drop);
+    });
+    await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
+    const proxyPort = proxy.address().port;
+    const direct = await browser.newPage();
+    const directRes = await direct.goto(`http://localhost:${piroPort}/`);
+    check(directRes.status() === 401, `login proxy: PiRO's own port refuses a browser that didn't log in (${directRes.status()})`);
+    await direct.close();
+    const pageP = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+    pageP.on('pageerror', (e) => errors.push('proxy: ' + e.message));
+    await pageP.goto(`http://localhost:${proxyPort}/`);
+    await pageP.waitForFunction(() => document.getElementById('led-text').textContent === 'Connected', null, { timeout: 8000 });
+    await pageP.waitForFunction(() => navigator.serviceWorker?.controller != null, null, { timeout: 8000 }).catch(() => {});
+    const controlled = await pageP.evaluate(() => navigator.serviceWorker?.controller != null);
+    if (!controlled) {
+      // The first load isn't controlled by the service worker; a reload is.
+      await pageP.reload();
+      await pageP.waitForFunction(() => document.getElementById('led-text').textContent === 'Connected', null, { timeout: 8000 });
+    }
+    check(await pageP.evaluate(() => navigator.serviceWorker?.controller != null), 'login proxy: the service worker controls the page');
+    check([...proxyServer.clients].some((ws) => ws.loginUser === 'vk3abc'), 'login proxy: PiRO knows who is connected');
+    expired = true;
+    for (const s of tunnels) s.destroy();
+    await pageP.waitForURL(/\/oauth2\/sign_in/, { timeout: 20000 }).then(
+      () => check(true, 'login proxy: after the login expires, the page reloads to the sign-in page'),
+      () => check(false, `login proxy: the page should reload to the sign-in page (still at ${pageP.url()})`)
+    );
+    await pageP.close();
+    await new Promise((r) => proxy.close(r));
+    await proxyServer.close();
+  }
+
   check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await pageB.close();
   await browser.close();

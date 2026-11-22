@@ -5,7 +5,7 @@
 // can't intercept ws:// traffic anyway, and rig state should never be
 // served stale from cache.
 
-const CACHE_NAME = 'piro-shell-v154';
+const CACHE_NAME = 'piro-shell-v155';
 
 const SHELL_ASSETS = [
   '/',
@@ -13,6 +13,8 @@ const SHELL_ASSETS = [
   '/styles.css',
   '/app.js',
   '/rpc.js',
+  '/login-check.js',
+  '/idle-logout.js',
   '/audio.js',
   '/audio-codec.js',
   '/scope.js',
@@ -44,6 +46,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Never handled here: a login proxy's own pages (oauth2-proxy uses
+// /oauth2/...), the page shown after an idle logout, and the client's
+// login check (?auth-check). Those must always go to the network.
+function bypass(url) {
+  return url.pathname.startsWith('/oauth2/') || url.pathname === '/logged-out.html' || url.search.includes('auth-check');
+}
+
 self.addEventListener('fetch', (event) => {
   // Only handle same-origin GET requests for the app shell; let
   // everything else (in particular, nothing — WS isn't fetch) pass
@@ -52,6 +61,19 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+  if (bypass(url)) return;
+
+  if (event.request.mode === 'navigate') {
+    // Page loads go to the network first, so a login proxy can redirect an
+    // expired login to its sign-in page and a new build shows at once. The
+    // cached page is only used offline.
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        caches.match(event.request).then((cached) => cached || caches.match('/index.html'))
+      )
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {

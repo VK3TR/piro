@@ -106,5 +106,9 @@ operators, so frequency tables follow the WIA band plans.
   (ControlServer#pause): every request is refused, its features are off,
   and CivDriver is in pass-through. A feature that changes the radio on its
   own (like WSPR's unattended receive) must not start while paused.
+- No login by default. With `LOGIN_PROXY` on the login is mandatory
+  (src/server/login-proxy.js): a new listening port must stay on
+  loopback with it on (add it to `loginConfigErrors`) or have its own
+  login.
 - Third-party code keeps its licence notice (`third_party/`, `models/`).
   Parts are AGPL-3.0, so `SOURCE_CODE_URL` matters.
