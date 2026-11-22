@@ -6083,6 +6083,15 @@ sequencer is still on the same QSO (`ft8Qso.getQso().partnerCall ===
 qsoAdvanced.partnerCall`); otherwise it falls through to the normal engage
 path, which does not auto-send a mid-QSO row. Service-worker cache v163.
 
+### FT8/FT4: show Even/Odd slot labels (v164)
+
+Surfaces the transmit-slot parity the lock works with: the slot indicator
+reads `slot HH:MM:SSZ · Even` and the scheduled-send status reads
+`Scheduled: "..." — HH:MM:SSZ · Odd`, matching WSJT-X's :00/:30 (Even) and
+:15/:45 (Odd) convention, so the operator can see which slot a reply is
+queued for. Client only (app.js, via the existing slotParityLabel()).
+Service-worker cache v164.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still

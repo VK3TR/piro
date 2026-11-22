@@ -5079,7 +5079,7 @@ let ft8ReplySlotMs = null;
 let ft8ParityLockPartner = null;
 link.addEventListener('ft8-decodes', (event) => {
   const { slotStartMs, messages } = event.detail || {};
-  ft8SlotTimeEl.textContent = slotStartMs != null ? `slot ${formatUtcTime(slotStartMs)}Z` : '—';
+  ft8SlotTimeEl.textContent = slotStartMs != null ? `slot ${formatUtcTime(slotStartMs)}Z · ${slotParityLabel(slotStartMs)}` : '—';
   ft8TableBodyEl.innerHTML = '';
   if (!messages || messages.length === 0) {
     const empty = document.createElement('div');
@@ -5210,7 +5210,7 @@ link.addEventListener('ft8-tx-status', (event) => {
   ft8StatusEl.classList.toggle('ft8-status--warn', gridTrimNote);
   switch (status) {
     case 'scheduled':
-      ft8StatusEl.textContent = `Scheduled: "${message}" — sending at ${sendAtMs != null ? formatUtcTime(sendAtMs) : 'next slot'}Z`;
+      ft8StatusEl.textContent = `Scheduled: "${message}" — ${sendAtMs != null ? `${formatUtcTime(sendAtMs)}Z · ${slotParityLabel(sendAtMs)}` : 'next slot'}`;
       break;
     case 'sending':
       ft8StatusEl.textContent = `Sending: "${message}"…`;
