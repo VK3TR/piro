@@ -5066,20 +5066,34 @@ link.addEventListener('ft8-decodes', (event) => {
   // whatever this slot decoded, *before* rendering rows below, so the
   // active-QSO highlight below reflects this slot's state rather than
   // the previous one.
-  applyFt8Suggestion(ft8Qso.ingestDecodes(sorted));
+  const qsoAdvanced = ft8Qso.ingestDecodes(sorted);
+  applyFt8Suggestion(qsoAdvanced);
   const activeQso = ft8Qso.getQso();
 
   // Someone calling us: a chime (once per caller; see call-alert.js), and their rows marked.
   const callers = callAlert.check(sorted, slotStartMs, stationCallsign);
   if (callers.length) playCallChime();
 
+  // When the partner's reply advances the sequence this slot, mark that
+  // decode as the row to act on and bring it into view, so the operator
+  // can just double-click it to send the staged next message. Gated on
+  // qsoAdvanced (truthy only on the slot the reply lands), so it highlights
+  // once per exchange rather than every slot the QSO is active.
+  let selectedRow = null;
   for (const msg of sorted) {
     const row = document.createElement('div');
     row.className = 'ft8-table__row';
     if (isRelatedToQso(msg, activeQso)) row.classList.add('ft8-table__row--qso');
     if (isToMe(msg)) row.classList.add('ft8-table__row--to-me');
+    const advancedRow = qsoAdvanced && isRelatedToQso(msg, activeQso);
+    if (advancedRow) {
+      row.classList.add('ft8-table__row--selected');
+      selectedRow = row;
+    }
     row.setAttribute('role', 'row');
-    row.title = 'Click to copy this message into the composer';
+    row.title = advancedRow
+      ? 'Your turn: double-click to send your reply'
+      : 'Click to copy this message into the composer';
     const utc = document.createElement('span');
     utc.textContent = slotStartMs != null ? formatUtcTime(slotStartMs) : '—';
     const dt = document.createElement('span');
@@ -5116,13 +5130,19 @@ link.addEventListener('ft8-decodes', (event) => {
     });
     ft8TableBodyEl.appendChild(row);
   }
+  // Only the advancing slot sets selectedRow, so this nudges the view at
+  // most once per exchange and won't fight a manual scroll between replies.
+  if (selectedRow) selectedRow.scrollIntoView({ block: 'nearest' });
 });
 
 link.addEventListener('ft8-tx-status', (event) => {
   const { status, message, error, sendAtMs } = event.detail || {};
   ft8StatusEl.hidden = false;
   ft8SendInFlight = status === 'scheduled' || status === 'sending';
-  ft8SendBtn.disabled = ft8SendInFlight;
+  // 'scheduled' = queued but not yet keyed, so it can still be pulled back
+  // -> offer Stop. 'sending' = on the air, too late -> locked. Anything else
+  // (sent / error / cancelled / idle) -> back to a normal Send.
+  setFt8SendMode(status === 'scheduled' ? 'cancel' : status === 'sending' ? 'busy' : 'send');
   // Flag a grid that was trimmed to 4 chars for this send (see
   // sendFt8Message) on the live status line, so the operator sees the
   // real outgoing message rather than their 6-char input. Matched on the
@@ -5140,6 +5160,11 @@ link.addEventListener('ft8-tx-status', (event) => {
       break;
     case 'sent':
       ft8StatusEl.textContent = `Sent: "${message}"`;
+      break;
+    case 'cancelled':
+      // A queued (not-yet-on-air) reply was dropped server-side -- the
+      // operator pressed Stop, or the mode changed before the slot boundary.
+      ft8StatusEl.textContent = 'Send canceled';
       break;
     case 'error':
       ft8StatusEl.textContent = `FT8 TX failed: ${error || 'unknown error'}`;
@@ -5247,9 +5272,27 @@ function sendFt8Message() {
   }
 }
 
-ft8SendBtn.addEventListener('click', sendFt8Message);
+// While a transmission is scheduled the Send button becomes a red Stop that
+// cancels it (abortFt8); once it is on the air the button locks; otherwise it
+// sends. ft8SendMode is driven by the ft8-tx-status handler above.
+let ft8SendMode = 'send';
+function handleFt8SendButton() {
+  if (ft8SendMode === 'cancel') {
+    link.request('abortFt8').catch((err) => showError(`Couldn't stop the transmission: ${err.message}`));
+  } else {
+    sendFt8Message();
+  }
+}
+function setFt8SendMode(mode) {
+  ft8SendMode = mode;
+  const cancel = mode === 'cancel';
+  ft8SendBtn.textContent = cancel ? 'Stop' : 'Send';
+  ft8SendBtn.disabled = mode === 'busy';
+  ft8SendBtn.classList.toggle('ft8-composer__send--cancel', cancel);
+}
+ft8SendBtn.addEventListener('click', handleFt8SendButton);
 ft8ComposerInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') sendFt8Message();
+  if (event.key === 'Enter') handleFt8SendButton();
 });
 
 /**

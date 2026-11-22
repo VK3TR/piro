@@ -5962,6 +5962,39 @@ already-encoded audio with no encode on the critical path.
   and sends replySlotMs). Test: ft8-bridge.test.js.
 - Service-worker cache v154.
 
+### FT8/FT4 usability: Stop a queued send, auto-select the partner's reply (v157)
+
+Two more point-and-click conveniences on the guided-QSO flow, on top of the
+double-click row-to-send above.
+
+**Stop a scheduled transmission.** A reply is encoded and queued at the start
+of the slot but doesn't key the radio until the slot boundary, so there's a
+window to pull it back. While a send is `scheduled` the **Send** button turns
+into a red **Stop**; pressing it sends `abortFt8`, which drops the queued-but-
+not-yet-on-air transmission server-side (`cancelPendingTx`) and shows "Send
+canceled". Once the status is `sending` (on the air) the button locks instead
+-- too late to abort. The same path already fires when the FT8/FT4 variant is
+switched before a queued reply goes out, so a stale reply can't transmit in
+the new mode.
+
+- Server: `ft8-bridge.js` gains `cancelPendingTx(reason)` (rejects the pending
+  TX promise and broadcasts a `cancelled` status); `setVariant` now routes
+  through it. `protocol.js` adds the `abortFt8` request; `ws-server.js` maps it
+  to an `ft8-abort` event the bridge listens for.
+- Client: `app.js` drives the Send/Stop/busy button state off the tx-status
+  event and handles the `cancelled` status; `styles.css` adds the red
+  `--cancel` button style.
+
+**Auto-select the partner's reply.** When an incoming decode advances the
+guided sequence, that row is highlighted green ("your turn") and scrolled into
+view, so the operator can just double-click it to send the staged next
+message. The highlight is gated on the sequence actually advancing this slot,
+so it marks the row once per exchange rather than every slot the QSO is live,
+and the scroll nudge won't fight a manual scroll between replies.
+
+- Client only: `app.js` (marks the advancing row, scrolls it into view),
+  `styles.css` (the green `--selected` row). Service-worker cache v157.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still
