@@ -6072,6 +6072,17 @@ Three follow-up correctness fixes from review:
   (on message text) reset the NEW QSO. It now also checks the active QSO is
   still the one that sent the final before resetting. Service-worker cache v162.
 
+### FT8/FT4 usability: guard a stale advancing-row double-click (v163)
+
+Follow-up to the review fixes: the advancing (highlighted) row's double-click
+sends the captured `qsoAdvanced` suggestion. If the operator engaged a
+*different* station between the slot render and the double-click, that
+suggestion is stale -- it would transmit the old station's reply while the
+sequencer tracks the new one. The handler now only sends it when the live
+sequencer is still on the same QSO (`ft8Qso.getQso().partnerCall ===
+qsoAdvanced.partnerCall`); otherwise it falls through to the normal engage
+path, which does not auto-send a mid-QSO row. Service-worker cache v163.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still
