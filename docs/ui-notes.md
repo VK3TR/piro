@@ -6004,6 +6004,14 @@ advancing row now sends the sequencer's already-staged reply, and any other
 row only auto-sends when engage() produced a real guided reply -- otherwise
 the decode is just staged for the operator to confirm with Send. Service-worker cache v158.
 
+Review fix (v159): Stop-ing a guided QSO's final RR73/73 no longer loses it.
+The final reply is only *scheduled* when Send runs, so wrapping up the QSO
+(reset the sequencer + composer back to CQ) is now deferred until the
+transmission actually goes out ('sent', matched on the message text). If it's
+cancelled with Stop (or errors), the QSO and composer are kept intact so Send
+retries the final reply instead of sending a fresh CQ. Service-worker cache
+v159.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still

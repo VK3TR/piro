@@ -5186,6 +5186,22 @@ link.addEventListener('ft8-tx-status', (event) => {
     default:
       ft8StatusEl.hidden = true;
   }
+  // Finish a completed guided QSO only when ITS final reply actually went out
+  // (matched on the message text, since TX status is broadcast to every
+  // browser). On cancel (Stop) or error the final never transmitted, so clear
+  // the pending flag and leave the QSO + composer so Send can retry it.
+  if (ft8FinalResetPending != null && message === ft8FinalResetPending) {
+    if (status === 'sent') {
+      ft8FinalResetPending = null;
+      ft8Qso.reset();
+      currentQsoFreqHz = ft8DefaultTxFreqHz;
+      scopeDisplay.setQsoFreq(currentQsoFreqHz);
+      hideQsoStatus();
+      ft8ComposerInput.value = defaultCqMessage(stationCallsign, stationGrid);
+    } else if (status === 'cancelled' || status === 'error') {
+      ft8FinalResetPending = null;
+    }
+  }
   if (gridTrimNote) ft8StatusEl.textContent += ' \u2014 grid trimmed to 4 chars (FT8 limit)';
 });
 
@@ -5236,6 +5252,12 @@ function flushPendingRowSelection() {
   }
 }
 
+// A guided QSO's final reply (RR73/73) is only *scheduled* when Send runs,
+// not yet on the air. This holds that final message's text while its send is
+// in flight (else null), so the QSO is wrapped up only once the transmission
+// actually goes out -- letting Stop/cancel retry it. See the ft8-tx-status
+// handler.
+let ft8FinalResetPending = null;
 function sendFt8Message() {
   flushPendingRowSelection();
   const typed = ft8ComposerInput.value.trim().toUpperCase();
@@ -5277,19 +5299,14 @@ function sendFt8Message() {
   if (ft8ReplySlotMs != null) request.replySlotMs = ft8ReplySlotMs;
   link.request('sendFt8', request).catch((err) => showError(`Couldn't send FT8 message: ${err.message}`));
 
-  // Once the guided sequence has reached its final step, sending
-  // whatever's in the composer wraps this QSO up — reset and get ready
-  // for the next one rather than leaving a "completed" QSO sitting
-  // highlighted and tracked indefinitely. Falls back to the session's
-  // default frequency, not null, for the same reason as the fresh-CQ
-  // case above.
-  if (ft8Qso.getQso()?.step === 'complete') {
-    ft8Qso.reset();
-    currentQsoFreqHz = ft8DefaultTxFreqHz;
-    scopeDisplay.setQsoFreq(currentQsoFreqHz);
-    hideQsoStatus();
-    ft8ComposerInput.value = defaultCqMessage(stationCallsign, stationGrid);
-  }
+  // Once the guided sequence has reached its final step, sending whatever's
+  // in the composer wraps this QSO up. But the final reply is only SCHEDULED
+  // here -- the operator can still Stop it before it keys the radio -- so
+  // just remember the wrap-up is pending (by message text) and defer it until
+  // the transmission actually goes out ('sent'). On cancel/error the final
+  // never transmitted, so the QSO and composer are left intact to retry
+  // rather than starting a fresh CQ. See the ft8-tx-status handler.
+  ft8FinalResetPending = ft8Qso.getQso()?.step === 'complete' ? text : null;
 }
 
 // While a transmission is scheduled the Send button becomes a red Stop that
