@@ -5067,6 +5067,14 @@ function formatUtcTime(ms) {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
+// Even/Odd label for a slot (epoch ms), matching WSJT-X's :00/:30 (Even) and
+// :15/:45 (Odd) convention, shown on the slot indicator and TX schedule line.
+function slotParityLabel(slotStartMs) {
+  if (slotStartMs == null) return '';
+  const slotMs = ft8Variant === 'FT4' ? 7500 : 15000;
+  return Math.floor(slotStartMs / slotMs) % 2 === 0 ? 'Even' : 'Odd';
+}
+
 // The slot (epoch ms) of the decode the operator is answering, so a
 // reply is scheduled in the opposite slot parity -- the one the far
 // station is listening in (see sendFt8Message() and ft8-bridge.js).
