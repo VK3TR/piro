@@ -243,12 +243,14 @@ class Ft8Bridge {
       this._pskSpotEnabled = enabled;
     };
     this._onVariantRequest = (variant) => this.setVariant(variant);
+    this._onAbortRequest = () => this.cancelPendingTx('the transmission was canceled');
 
     this.controlServer.on('ptt', this._onPtt);
     this.controlServer.on('ft8-active', this._onActiveRequest);
     this.controlServer.on('ft8-send', this._onSendRequest);
     this.controlServer.on('psk-spot-enabled', this._onPskSpotEnabledRequest);
     this.controlServer.on('ft8-variant', this._onVariantRequest);
+    this.controlServer.on('ft8-abort', this._onAbortRequest);
     this.slotClock.on('boundary', this._onBoundary);
     this.worker.on('message', this._onWorkerMessage);
     this.worker.on('error', (err) => console.error('[ft8] decode worker error:', err.message));
@@ -268,6 +270,7 @@ class Ft8Bridge {
     this.controlServer.off('ft8-send', this._onSendRequest);
     this.controlServer.off('psk-spot-enabled', this._onPskSpotEnabledRequest);
     this.controlServer.off('ft8-variant', this._onVariantRequest);
+    this.controlServer.off('ft8-abort', this._onAbortRequest);
     this.slotClock.off('boundary', this._onBoundary);
     if (this._pttReleaseTimer) clearTimeout(this._pttReleaseTimer);
     for (const { reject } of this._pendingRequests.values()) reject(new Error('Ft8Bridge stopped'));
@@ -306,11 +309,22 @@ class Ft8Bridge {
     this._protocol = variant;
     this.slotClock.setSlotMs(PROTOCOLS[variant].slotMs);
     this._rxChunks = [];
-    if (this._pendingTxMessage) {
-      const { reject } = this._pendingTxMessage;
-      this._pendingTxMessage = null;
-      reject(new Error('FT8/FT4 mode changed before this transmission went out'));
-    }
+    this.cancelPendingTx('FT8/FT4 mode changed before this transmission went out');
+  }
+
+  /**
+   * Cancels a transmission queued for the next slot boundary but not yet on
+   * the air (rejects its send promise and clears the "Scheduled" line on
+   * every browser via a broadcast); a transmission already in flight (PTT up,
+   * playback started) is untouched. Used when the operator presses Stop
+   * (abortFt8) or the mode changes (setVariant).
+   */
+  cancelPendingTx(reason) {
+    if (!this._pendingTxMessage) return;
+    const { reject, message } = this._pendingTxMessage;
+    this._pendingTxMessage = null;
+    reject(new Error(reason));
+    this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'cancelled', message, reason });
   }
 
   _syncAttachment() {

@@ -5961,3 +5961,161 @@ already-encoded audio with no encode on the critical path.
   ws-server.js. Client: app.js (remembers the answered decode's slot
   and sends replySlotMs). Test: ft8-bridge.test.js.
 - Service-worker cache v154.
+
+### FT8/FT4 usability: Stop a queued send, auto-select the partner's reply (v157)
+
+Two more point-and-click conveniences on the guided-QSO flow, on top of the
+double-click row-to-send above.
+
+**Stop a scheduled transmission.** A reply is encoded and queued at the start
+of the slot but doesn't key the radio until the slot boundary, so there's a
+window to pull it back. While a send is `scheduled` the **Send** button turns
+into a red **Stop**; pressing it sends `abortFt8`, which drops the queued-but-
+not-yet-on-air transmission server-side (`cancelPendingTx`) and shows "Send
+canceled". Once the status is `sending` (on the air) the button locks instead
+-- too late to abort. The same path already fires when the FT8/FT4 variant is
+switched before a queued reply goes out, so a stale reply can't transmit in
+the new mode.
+
+- Server: `ft8-bridge.js` gains `cancelPendingTx(reason)` (rejects the pending
+  TX promise and broadcasts a `cancelled` status); `setVariant` now routes
+  through it. `protocol.js` adds the `abortFt8` request; `ws-server.js` maps it
+  to an `ft8-abort` event the bridge listens for.
+- Client: `app.js` drives the Send/Stop/busy button state off the tx-status
+  event and handles the `cancelled` status; `styles.css` adds the red
+  `--cancel` button style.
+
+**Auto-select the partner's reply.** When an incoming decode advances the
+guided sequence, that row is highlighted green ("your turn") and scrolled into
+view, so the operator can just double-click it to send the staged next
+message. The highlight is gated on the sequence actually advancing this slot,
+so it marks the row once per exchange rather than every slot the QSO is live,
+and the scroll nudge won't fight a manual scroll between replies.
+
+- Client only: `app.js` (marks the advancing row, scrolls it into view),
+  `styles.css` (the green `--selected` row).
+
+Review fix (v158): double-clicking the highlighted partner reply now sends
+**our staged response**, not the decoded message on the row. `engage()` only
+returns a reply for a CQ or a reply-to-our-CQ, so mid-QSO (a report, an
+R-report, RR73) it returned null and the old double-click fell back to
+copying the *received* text into the composer and transmitting it. The
+advancing row now sends the sequencer's already-staged reply, and any other
+row only auto-sends when engage() produced a real guided reply -- otherwise
+the decode is just staged for the operator to confirm with Send. Service-worker cache v158.
+
+Review fix (v159): Stop-ing a guided QSO's final RR73/73 no longer loses it.
+The final reply is only *scheduled* when Send runs, so wrapping up the QSO
+(reset the sequencer + composer back to CQ) is now deferred until the
+transmission actually goes out ('sent', matched on the message text). If it's
+cancelled with Stop (or errors), the QSO and composer are kept intact so Send
+retries the final reply instead of sending a fresh CQ. Service-worker cache
+v159.
+
+### FT8/FT4 usability: parity-lock, band-change reset, phone polish (v160)
+
+Three conveniences from on-air use, folded in here.
+
+**Transmit-slot parity lock.** FT8/FT4 are strict ping-pong on alternating
+15 s slots, so a reply must land in the opposite parity to the slot the
+partner was heard in. Scheduling each reply opposite the *last* decode meant
+that if the partner's decode wandered parity for a slot (bad clock, or a
+late decode mis-slotted) our own transmit slot flipped with it, breaking the
+sequence. `ft8ParityLockPartner` now locks the reply-slot reference to the
+slot we first heard the partner in and holds it for the QSO -- set when a QSO
+starts (answering a CQ, or someone answering our CQ), only re-set when the
+partner changes, and cleared on a fresh CQ, a band/variant change, leaving
+FT8, or the QSO completing. Frequency still drift-tracks independently.
+
+**Band change resets to CQ.** A real band change mid-session (band chip) left
+the station you were working -- and its staged reply and locked parity -- in
+the composer, so the next send went to a station no longer in front of you.
+A shared `resetFt8QsoToCq()` now clears the table, resets the sequencer,
+drops the parity lock, and refills the composer with the default CQ -- only
+on an actual band change, not the first tune or a same-band re-tune.
+
+**Phone polish.** On narrow screens the fixed UTC/dt/Freq/SNR columns
+squeezed the message column; a scoped `@media (max-width: 560px)` rule drops
+the message onto its own full-width wrapping line. SNR is rounded to 2 dp
+(and its column widened for values like -24.00), and the metadata columns
+are muted so the decoded message reads as the primary content. All scoped to
+`#ft8-table`. Service-worker cache v160.
+
+### FT8/FT4: click a busy station to call it (v161)
+
+Clicking a decode row for a station that is not calling CQ and not answering
+us -- one station working another -- used to drop the raw message onto the
+send line (or, mid-QSO, be ignored). Neither was useful. Now such a click
+means "I want to work this station": a new `Ft8QsoSequencer.startCalling()`
+composes our standard first call to that row's sender, "THEIRCALL MYCALL
+GRID" (e.g. clicking `TT1GD K8ZP FM17` stages `K8ZP W4PFI EM95`) and tracks
+them as the partner, so the operator can wait for them to finish their
+current QSO and then send. Clicking a CQ, or a reply addressed to us, still
+engages exactly as before; only free text / telemetry with no callsign falls
+back to the raw copy-into-composer. `_startFromCq` now delegates to a shared
+`_startCalling`, so answering a CQ and calling a heard station build the same
+message. Client only (ft8-qso.js, app.js). Service-worker cache v161.
+
+### FT8/FT4 usability: review round-2 fixes (v162)
+
+Three follow-up correctness fixes from review:
+- **startCalling validates the sender.** `parseFt8Message` sets `fromCall` to
+  the second token even for free text ("TNX FER QSO" -> "FER"), which staged a
+  call to a non-station. startCalling now requires `fromCall` to match the
+  callsign pattern; anything else stays on the non-auto-send copy fallback.
+- **Pending row-click cleared on reset.** A single click defers engaging on a
+  250 ms timer; a band/variant change or leaving FT8 within that window used
+  to let the stale callback engage the old decode after the session reset.
+  The reset paths now clear the pending selection and its timer.
+- **Deferred final reset bound to its QSO.** The final-RR73/73 wrap-up is
+  deferred to 'sent'; if the operator engaged a new QSO meanwhile, that match
+  (on message text) reset the NEW QSO. It now also checks the active QSO is
+  still the one that sent the final before resetting. Service-worker cache v162.
+
+### FT8/FT4 usability: guard a stale advancing-row double-click (v163)
+
+Follow-up to the review fixes: the advancing (highlighted) row's double-click
+sends the captured `qsoAdvanced` suggestion. If the operator engaged a
+*different* station between the slot render and the double-click, that
+suggestion is stale -- it would transmit the old station's reply while the
+sequencer tracks the new one. The handler now only sends it when the live
+sequencer is still on the same QSO (`ft8Qso.getQso().partnerCall ===
+qsoAdvanced.partnerCall`); otherwise it falls through to the normal engage
+path, which does not auto-send a mid-QSO row. Service-worker cache v163.
+
+### FT8/FT4: show Even/Odd slot labels (v164)
+
+Surfaces the transmit-slot parity the lock works with: the slot indicator
+reads `slot HH:MM:SSZ · Even` and the scheduled-send status reads
+`Scheduled: "..." — HH:MM:SSZ · Odd`, matching WSJT-X's :00/:30 (Even) and
+:15/:45 (Odd) convention, so the operator can see which slot a reply is
+queued for. Client only (app.js, via the existing slotParityLabel()).
+Service-worker cache v164.
+
+### FT8/FT4: don't let a double-click send behind a live transmission (v165)
+
+Review fix (P2). While a reply was scheduled or on the air (the Send button
+showing **Stop**, or disabled), double-clicking a guided decode row still
+called `sendFt8Message()` -- the button guards the click path but the native
+`dblclick` handler bypassed it. That queued a second transmission behind the
+live one and overwrote the on-air status; when the first finished, its `sent`
+restored the normal Send button while the second reply stayed queued with no
+Stop control. The dblclick handler now ignores its send while `ft8SendInFlight`
+(a single click still stages the row). Client only. Service-worker cache v165.
+
+### FT8/FT4: double-click a decode row to send (v156)
+
+Builds on the existing click-to-engage guided QSO: a **single click** still
+engages (prefills the next message / tracks the QSO), but it is now deferred
+on a short (250 ms) timer so a **double-click** can pre-empt it and **send
+right away** -- the point-and-click way to answer a CQ or fire off a reply.
+
+- Keys off the native `dblclick` event, which a touchscreen does not fire, so
+  on a phone/tablet a **tap stages** the message (the Send button pulses via
+  applyFt8Suggestion) and you tap Send to transmit. No device detection; a
+  mouse/trackpad double-click still sends.
+- The single-click engage is factored into `engageFt8Row()`, shared by the
+  dblclick handler. If Send is pressed inside the 250 ms window, the pending
+  row selection is **flushed first** (flushPendingRowSelection), so Send uses
+  the row the operator picked, not the previous composer contents.
+- Client only: app.js. Service-worker cache v156.

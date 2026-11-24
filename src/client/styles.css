@@ -409,7 +409,7 @@ button {
 .ft8-table__head,
 .ft8-table__row {
   display: grid;
-  grid-template-columns: 4.5em 3em 5em 3.5em 1fr;
+  grid-template-columns: 4.5em 3em 5em 4em 1fr;
   gap: 6px;
   padding: 4px 8px;
 }
@@ -450,10 +450,52 @@ button {
   background: color-mix(in srgb, var(--led-amber) 18%, var(--panel-raised));
 }
 
+/* Guided QSO: the partner's reply, highlighted as the row to act on
+   (double-click to send the staged next message). Green reads as "ready"
+   and stands out from the amber in-QSO rows. After --qso so it wins when a
+   row has both classes. */
+.ft8-table__row--selected {
+  background: color-mix(in srgb, var(--led-green) 16%, transparent);
+  border-left: 3px solid var(--led-green);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--led-green) 40%, transparent);
+}
+.ft8-table__row--selected:hover {
+  background: color-mix(in srgb, var(--led-green) 24%, var(--panel-raised));
+}
+
 .ft8-table__row > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* FT8 decode table: mute the metadata columns (UTC/dt/Freq/SNR) so the
+   decoded message reads as the primary content; keep the message bright. */
+#ft8-table .ft8-table__row > span {
+  color: var(--text-muted);
+}
+#ft8-table .ft8-table__row > span:last-child {
+  color: var(--text);
+}
+
+/* Phones / very narrow windows: the fixed UTC/dt/Freq/SNR columns leave the
+   FT8 message column too narrow to read, so put the message on its own
+   full-width line below the metadata and let it wrap instead of truncating.
+   Scoped to #ft8-table (its message is the last column); the other decode
+   tables and desktop (panel >= 560px) are unchanged. */
+@media (max-width: 560px) {
+  #ft8-table .ft8-table__head,
+  #ft8-table .ft8-table__row {
+    grid-template-columns: 5.6em 2.8em 5em 1fr;
+  }
+  #ft8-table .ft8-table__head > span:last-child,
+  #ft8-table .ft8-table__row > span:last-child {
+    grid-column: 1 / -1;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+  }
 }
 
 .ft8-table__empty {
@@ -485,6 +527,11 @@ button {
   border-color: var(--led-amber);
 }
 
+.ft8-composer__send--cancel {
+  border-color: var(--led-red);
+  color: var(--led-red);
+  background: color-mix(in srgb, var(--led-red) 14%, var(--panel-raised));
+}
 .ft8-composer__send:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -505,6 +552,12 @@ button {
    operator notices the outgoing message differs from what they typed. */
 .ft8-status--warn {
   color: var(--led-amber);
+}
+/* On-air transmit status: red, and wins over --warn (placed after it) so a
+   keyed radio always reads red. */
+.ft8-status--tx {
+  color: var(--led-red);
+  font-weight: 600;
 }
 
 /* Guided-QSO progress line (see src/client/ft8-qso.js) — distinct from

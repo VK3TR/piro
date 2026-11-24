@@ -1276,6 +1276,14 @@ class ControlServer extends EventEmitter {
           ws.send(makeResult(id, { accepted: true }));
           break;
         }
+        case REQUEST.ABORT_FT8: {
+          // Cancels a transmission scheduled for the next slot boundary but
+          // not yet keyed up (Ft8Bridge#cancelPendingTx); a no-op once on the
+          // air. Internal-only event, same pattern as 'ft8-send'.
+          this.emit('ft8-abort');
+          ws.send(makeResult(id, { accepted: true }));
+          break;
+        }
         case REQUEST.ABORT_CW: {
           this.emit('cw-abort');
           ws.send(makeResult(id, { accepted: true }));
