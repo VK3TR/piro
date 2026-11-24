@@ -1,6 +1,7 @@
 'use strict';
 
 const { ensureDataMode } = require('../civ/data-mode-guard');
+const { Ft8AutoSequencer } = require('../server/ft8-auto-sequencer');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { encodeFT8, encodeFT4 } = require('@e04/ft8ts');
@@ -147,12 +148,28 @@ class Ft8Bridge {
     pttReleaseMarginMs,
     pskReporter,
     dataSettleMs,
+    autoCqRepeats,
   }) {
     if (!civ) throw new Error('Ft8Bridge requires opts.civ');
     if (!controlServer) throw new Error('Ft8Bridge requires opts.controlServer');
     if (!audioBridge) throw new Error('Ft8Bridge requires opts.audioBridge');
     this.civ = civ;
     this.controlServer = controlServer;
+    // Server-side guided-QSO auto-sequencer: when armed (Auto on + a QSO), it
+    // generates the decode-triggered replies here, with no browser round-trip.
+    this._autoSequencer = new Ft8AutoSequencer({ myCall: controlServer.state && controlServer.state.stationCallsign, cqRepeats: autoCqRepeats });
+    // The slot (epoch ms) the current auto QSO's partner was FIRST heard in;
+    // every server-generated reply's transmit parity is locked to it (the
+    // station listens in the opposite parity), so a later decode that wanders
+    // into the other parity can't flip which slot we transmit in. The
+    // server-side counterpart of app.js's ft8ReplySlotMs/ft8ParityLockPartner
+    // (docs/ui-notes.md, "Transmit-slot parity lock"). null = not yet locked.
+    this._autoReplySlotMs = null;
+    // The slot (epoch ms) we last transmitted in. Its trailing audio gets a
+    // short decode after PTT releases; that is our own TX slot, not a receive
+    // slot, so the auto-sequencer skips it (it must not re-CQ, spend the CQ
+    // budget, or seed the parity lock from a slot we transmitted in).
+    this._lastTxSlotMs = null;
     this.audioBridge = audioBridge;
     this.dataSettleMs = dataSettleMs; // see civ/data-mode-guard.js
     // Keyed the same way as PROTOCOLS/this._protocol above, so
@@ -244,6 +261,8 @@ class Ft8Bridge {
     };
     this._onVariantRequest = (variant) => this.setVariant(variant);
     this._onAbortRequest = () => this.cancelPendingTx('the transmission was canceled');
+    this._onArmAuto = (ctx) => { this._autoSequencer.arm(ctx || {}); this._autoReplySlotMs = null; this._syncAutoState(); };
+    this._onDisarmAuto = (opts) => { this._autoSequencer.disarm(); this._autoReplySlotMs = null; this.cancelPendingTx('FT8 Auto disarmed before this reply went out'); this._syncAutoState(opts); };
 
     this.controlServer.on('ptt', this._onPtt);
     this.controlServer.on('ft8-active', this._onActiveRequest);
@@ -251,6 +270,8 @@ class Ft8Bridge {
     this.controlServer.on('psk-spot-enabled', this._onPskSpotEnabledRequest);
     this.controlServer.on('ft8-variant', this._onVariantRequest);
     this.controlServer.on('ft8-abort', this._onAbortRequest);
+    this.controlServer.on('ft8-arm-auto', this._onArmAuto);
+    this.controlServer.on('ft8-disarm-auto', this._onDisarmAuto);
     this.slotClock.on('boundary', this._onBoundary);
     this.worker.on('message', this._onWorkerMessage);
     this.worker.on('error', (err) => console.error('[ft8] decode worker error:', err.message));
@@ -271,6 +292,8 @@ class Ft8Bridge {
     this.controlServer.off('psk-spot-enabled', this._onPskSpotEnabledRequest);
     this.controlServer.off('ft8-variant', this._onVariantRequest);
     this.controlServer.off('ft8-abort', this._onAbortRequest);
+    this.controlServer.off('ft8-arm-auto', this._onArmAuto);
+    this.controlServer.off('ft8-disarm-auto', this._onDisarmAuto);
     this.slotClock.off('boundary', this._onBoundary);
     if (this._pttReleaseTimer) clearTimeout(this._pttReleaseTimer);
     for (const { reject } of this._pendingRequests.values()) reject(new Error('Ft8Bridge stopped'));
@@ -282,6 +305,25 @@ class Ft8Bridge {
   /** Arms/disarms RX decoding — the client calls this when opening/closing the FT8 panel. */
   setActive(active) {
     this._active = active;
+    // Deactivation (the FT8 panel closed, or the radio handed to a LAN client
+    // via ControlServer.pause -> _stopEverything, which emits 'ft8-active'
+    // false) must also stop the auto-sequencer: otherwise it stays armed and
+    // an in-flight decode that resolves after this -- or any later one -- could
+    // still queue an automatic reply and key the radio after it's been handed
+    // over (_handleBoundary transmits queued TX regardless of _active). Treated
+    // as an explicit operator-off so every browser's Auto toggle clears too.
+    if (!active) {
+      if (this._autoSequencer.active) {
+        this._autoSequencer.disarm();
+        this._autoReplySlotMs = null;
+        this._syncAutoState({ operatorOff: true });
+      }
+      // Cancel any reply already queued for the next boundary: _handleBoundary
+      // transmits it regardless of _active, so without this PiRO could key the
+      // radio after it's been handed to a LAN client. Covers a final reply
+      // whose sequencer has already self-disarmed too.
+      this.cancelPendingTx('FT8 was deactivated before this transmission went out');
+    }
     this._syncAttachment();
   }
 
@@ -319,6 +361,24 @@ class Ft8Bridge {
    * playback started) is untouched. Used when the operator presses Stop
    * (abortFt8) or the mode changes (setVariant).
    */
+  /**
+   * Pushes the auto-sequencer's current armed state to ControlServer, which
+   * stores it for the CONNECTED snapshot and broadcasts it to the browsers.
+   * Called whenever that state can change: arm, disarm, and after each decode
+   * advance (which may complete a QSO or, in cq-watch, start one). `opts`
+   * carries { operatorOff: true } when the disarm came from an operator
+   * toggling Auto off (so every browser clears its toggle, not just the one
+   * that was running the QSO); a self-disarm on QSO completion omits it, so
+   * Auto stays armed between exchanges.
+   */
+  _syncAutoState(opts) {
+    const q = this._autoSequencer.getQso();
+    this.controlServer.setFt8AutoState(q
+      ? { armed: true, partnerCall: q.partnerCall || null, role: q.role || null, step: q.step || null, cqWatch: q.mode === 'cq-watch',
+          freqHz: Number.isFinite(q.freqHz) ? q.freqHz : null, replySlotMs: this._autoReplySlotMs }
+      : { armed: false, operatorOff: !!(opts && opts.operatorOff) });
+  }
+
   cancelPendingTx(reason) {
     if (!this._pendingTxMessage) return;
     const { reject, message } = this._pendingTxMessage;
@@ -427,7 +487,7 @@ class Ft8Bridge {
    *   practice, see docs/ui-notes.md — rather than this bridge's one
    *   fixed default. Omit for a plain/manual send (e.g. a fresh CQ).
    */
-  send(message, { freqHz, replySlotMs } = {}) {
+  send(message, { freqHz, replySlotMs, cqAttempt, cqTotal } = {}) {
     return new Promise((resolve, reject) => {
       // A new send() supersedes any still-queued message: settle and clear it
       // up front, BEFORE encoding the replacement below, so a replacement that
@@ -476,12 +536,14 @@ class Ft8Bridge {
       // boundary handler fires it only in the matching parity slot, and
       // _transmitNow writes the already-encoded audio with no encode on the
       // critical path.
-      this._pendingTxMessage = { message, freqHz: actualFreqHz, txParity, pcm, resolve, reject };
+      this._pendingTxMessage = { message, freqHz: actualFreqHz, txParity, pcm, cqAttempt, cqTotal, resolve, reject };
       this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, {
         status: 'scheduled',
         message,
         freqHz: actualFreqHz,
         sendAtMs,
+        cqAttempt,
+        cqTotal,
       });
     });
   }
@@ -501,6 +563,7 @@ class Ft8Bridge {
       // manual send). Otherwise wait for the matching boundary.
       if (tx.txParity == null || this.slotClock.slotParity(slotStartMs) === tx.txParity) {
         this._pendingTxMessage = null;
+        this._lastTxSlotMs = slotStartMs;
         this._transmitNow(tx);
       }
     }
@@ -528,6 +591,38 @@ class Ft8Bridge {
         this._rememberCallsigns(discoveredCallsigns);
         this.controlServer.broadcastJsonEvent(EVENT.FT8_DECODES, { slotStartMs, messages });
         this._reportSpots(messages, slotStartMs);
+        // Server-side auto-sequence: if armed, advance on this slot's decodes
+        // and queue the reply right here -- no decode -> browser -> server
+        // round-trip (critical over a remote/Tailscale link; see
+        // server/ft8-auto-sequencer.js). NB: this removes the round-trip but
+        // not the slot latency -- decoding only starts once the RX slot has
+        // ended, so the reply still lands a cycle late unless the early-decode
+        // path (the reply-timing PR) prepares it before the TX boundary.
+        // Only auto-advance while FT8 is still active: a decode posted just
+        // before the panel closed / the radio was handed off can resolve after
+        // setActive(false) (which also disarms), so this guards against keying
+        // the radio with a reply queued from a stale decode after handover.
+        if (this._active && this._autoSequencer && this._autoSequencer.active && slotStartMs !== this._lastTxSlotMs) {
+          const reply = this._autoSequencer.advance(messages, { cqSuppressed: !!this._pendingTxMessage });
+          if (reply) {
+            console.log(`[ft8] auto-reply "${reply.message}" (${reply.step})`);
+            // Lock transmit parity to the first slot we heard the partner in
+            // and hold it for every reply in this QSO (cq-watch: the first
+            // answer sets it). Prevents a later opposite-parity decode from
+            // flipping our TX slot -- the server-side parity lock.
+            if (this._autoReplySlotMs == null) this._autoReplySlotMs = slotStartMs;
+            const opts = { replySlotMs: this._autoReplySlotMs };
+            if (reply.freqHz != null) opts.freqHz = reply.freqHz;
+            if (reply.cqAttempt != null) { opts.cqAttempt = reply.cqAttempt; opts.cqTotal = reply.cqTotal; }
+            this.send(reply.message, opts).catch((err) => console.error('[ft8] auto-reply failed:', err.message));
+          }
+          // advance() may have completed the QSO (self-disarm) or, in cq-watch,
+          // started one -- push the new armed state to the clients + snapshot.
+          this._syncAutoState();
+          // QSO finished (self-disarm): drop the parity lock so the next QSO
+          // re-locks to its own first-heard slot.
+          if (!this._autoSequencer.active) this._autoReplySlotMs = null;
+        }
       },
       reject: (err) => {
         this.controlServer.broadcastJsonEvent(EVENT.RIG_ERROR, { message: `FT8 decode failed: ${err.message}` });
@@ -606,10 +701,10 @@ class Ft8Bridge {
     }
   }
 
-  async _transmitNow({ message, freqHz, pcm, resolve, reject }) {
+  async _transmitNow({ message, freqHz, pcm, cqAttempt, cqTotal, resolve, reject }) {
     const actualFreqHz = freqHz ?? this.txBaseFrequencyHz;
     try {
-      this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'sending', message, freqHz: actualFreqHz });
+      this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'sending', message, freqHz: actualFreqHz, cqAttempt, cqTotal });
       // Prefer the waveform built when this message was staged (see
       // send()), so the ~0.5s encode+resample doesn't delay the start of
       // transmission here at the slot boundary. Fall back to building it
@@ -640,7 +735,7 @@ class Ft8Bridge {
       this._pttReleaseTimer = null;
       await this.controlServer.setPttFromServer(false);
 
-      this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'sent', message, freqHz: actualFreqHz });
+      this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'sent', message, freqHz: actualFreqHz, cqAttempt, cqTotal });
       resolve();
     } catch (err) {
       try {
