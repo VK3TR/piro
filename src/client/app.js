@@ -5176,6 +5176,14 @@ link.addEventListener('ft8-decodes', (event) => {
         ft8RowClickTimer = null;
       }
       ft8PendingRowSel = null;
+      // A transmission is already scheduled or on the air (the Send button is
+      // showing Stop, or disabled): don't let a double-click queue another send
+      // behind it. Ft8Bridge.send() would accept it and broadcast 'scheduled',
+      // overwriting the live status, and when the current send finishes its
+      // 'sent' restores the normal Send button -- leaving the second reply
+      // pending with no Stop control. So ignore the double-click's send while
+      // busy; a single click still stages the row as before.
+      if (ft8SendInFlight) return;
       // This row advanced the sequence when its slot rendered, so OUR reply is
       // the staged qsoAdvanced suggestion -- but only if the sequencer is STILL
       // on that same QSO. If the operator engaged a different station since

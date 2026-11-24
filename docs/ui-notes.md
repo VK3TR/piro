@@ -6092,6 +6092,17 @@ reads `slot HH:MM:SSZ · Even` and the scheduled-send status reads
 queued for. Client only (app.js, via the existing slotParityLabel()).
 Service-worker cache v164.
 
+### FT8/FT4: don't let a double-click send behind a live transmission (v165)
+
+Review fix (P2). While a reply was scheduled or on the air (the Send button
+showing **Stop**, or disabled), double-clicking a guided decode row still
+called `sendFt8Message()` -- the button guards the click path but the native
+`dblclick` handler bypassed it. That queued a second transmission behind the
+live one and overwrote the on-air status; when the first finished, its `sent`
+restored the normal Send button while the second reply stayed queued with no
+Stop control. The dblclick handler now ignores its send while `ft8SendInFlight`
+(a single click still stages the row). Client only. Service-worker cache v165.
+
 ### FT8/FT4: double-click a decode row to send (v156)
 
 Builds on the existing click-to-engage guided QSO: a **single click** still
