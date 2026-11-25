@@ -14,7 +14,7 @@ Hamlib, no separate audio server and no extra apps.
 Written by VK3TR. Licensed AGPL-3.0-only (see
 [Licence](#licence)).
 
-**Current build: v165.** This is the version the app shows next to its title.
+**Current build: v166.** This is the version the app shows next to its title.
 It is the `CACHE_NAME` number in `src/client/sw.js`, which goes up with every
 change to the web app.
 
@@ -1619,8 +1619,19 @@ band.
   answer. PiRO then fills in each reply the exchange needs (grid, report,
   acknowledgement, RR73 or 73) as the other station's messages are
   decoded. The QSO's lines are highlighted. Replies go out on the other
-  station's frequency. PiRO only suggests: you press Send for every
-  message. It never transmits by itself.
+  station's frequency. By default PiRO only suggests -- you press Send for
+  each message -- unless **Auto** is on (below).
+- **Auto.** The **Auto** button beside Send (amber when armed) transmits the
+  guided-QSO replies for you, so you don't press Send for each one. You still
+  start each QSO -- tap a station, or call CQ -- and Auto then runs the
+  exchange to completion, timing each reply to its slot; the sequencing is
+  done on the server, so it stays reliable even over a remote link. Call CQ
+  with Auto on and PiRO answers whoever comes back (the strongest in a
+  pileup) and re-sends your CQ up to `FT8_AUTO_CQ_REPEATS` times (default 5;
+  `0` to only watch) if no one answers -- the status line shows the attempt,
+  e.g. `2/5`. Reload the page or briefly lose the link and the QSO is picked
+  back up; if no browser returns, PiRO disarms Auto so it never transmits
+  unattended. Click Auto again for manual Send.
 - **Transmit frequency.** Tap the spectrum to choose it (to the nearest
   50 Hz). It starts at 1500 Hz and stays where you put it until you
   reload the page.
@@ -2105,6 +2116,7 @@ All settings are environment variables. For the systemd service they go in
 | `SSTV_FSK_ID`, `SSTV_CW_ID` | on | `off` leaves out the FSK ID or the CW ID sent after each SSTV picture. Both use `STATION_CALLSIGN`. |
 | `HELL_TONE_HZ` | `1000` | Feld-Hell's default audio tone, in Hz, for sending and receiving, until it is changed in the UI. The band frequencies the client tunes to assume the signal is at this tone. |
 | `STATION_CALLSIGN`, `STATION_GRID` | none | Your callsign and Maidenhead grid. They set the FT8 default message and guided QSO, the FreeDV Reporter report, and WSPR's callsign (WSPR transmits only a plain call of up to 6 characters). |
+| `FT8_AUTO_CQ_REPEATS` | `5` | FT8/FT4 **Auto** mode: when you call CQ with Auto on and nobody answers, how many times the server re-sends your CQ automatically (parity-correct, every second slot). Your first CQ isn't counted; after this many unanswered auto-CQs it stops and leaves Auto armed for your next call. `0` = watch only, no auto-repeat. |
 | `WSPR_GRID` | `STATION_GRID` | The Maidenhead grid WSPR sends (the first 4 characters) and reports to wsprnet.org (4 or 6 characters, such as `QF22` or `QF22LB`). |
 | `WSPR_UPLOAD` | on | `off` stops WSPR spots going to wsprnet.org. Uploading also needs `STATION_CALLSIGN` and a grid. |
 | `WSPR_UNATTENDED` | off | `on` makes WSPR receive by itself 10 minutes after the last browser leaves: the radio goes to the WSPR frequency of its band (USB, DATA on), and goes back to how it was when a browser connects. It never transmits then. See [WSPR](#wspr). |
