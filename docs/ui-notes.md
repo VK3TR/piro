@@ -6134,6 +6134,21 @@ and server/ws-server.js; client in index.html, app.js, styles.css and ft8-qso.js
 Tests in test/ft8-auto-sequencer.test.js plus test/ft8-bridge.test.js and
 test/ft8-qso.test.mjs. Service-worker cache v166.
 
+### FT8/FT4: reply timing -- early decode and a late-start grace (v166)
+
+Two settings so a guided reply makes the *next* slot instead of a full parity
+cycle later (which matters over a remote link). `FT8_EARLY_DECODE_MS` (default
+2000) decodes that many ms before the slot boundary -- the signal has ended by
+then -- so the reply is worked out and queued before the boundary rather than
+at it. `FT8_TX_GRACE_MS` (default 2000) lets a reply that is ready just after
+the boundary still start (a small positive DT receivers tolerate), clamped
+per-send so the whole waveform still finishes before the next boundary; after
+the DATA-mode settle PiRO rechecks there is enough slot left before taking that
+late start. `FT8_DECODE_TIMING=1` logs decode timing to the journal for tuning.
+Switching FT4 <-> FT8 cancels a pending early decode so the new grid is decoded
+cleanly. Server only (`audio/ft8-bridge.js`), no build change, so it ships in
+v166.
+
 ### FT8/FT4: don't let a double-click send behind a live transmission (v165)
 
 Review fix (P2). While a reply was scheduled or on the air (the Send button
