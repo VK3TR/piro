@@ -96,6 +96,9 @@ class StubSlotClock extends EventEmitter {
   nextSlotStart() {
     return this._next;
   }
+  msUntilNextSlot() {
+    return this._msUntilNext ?? this.slotMs;
+  }
   // Parity API mirrors the real SlotClock, so send() can schedule a reply
   // against a replySlotMs (the server-side auto path uses it).
   slotParity(slotStartMs) {
@@ -958,6 +961,22 @@ async function run() {
     check(bridge._rxChunks.length === 1, 'RX audio accumulates while active, as a baseline for this test');
     bridge.setVariant('FT4');
     check(bridge._rxChunks.length === 0, 'setVariant() discards RX audio buffered under the previous protocol/slot grid');
+    bridge.stop();
+  }
+
+  {
+    // Switching protocol must cancel a pending early-decode timer and clear the
+    // "decoded early" flag, so the stale timer doesn't decode the new protocol's
+    // audio on the old schedule and suppress the next boundary's full decode
+    // (losing the first receive slot after the switch).
+    const { bridge } = makeBridge();
+    bridge.setActive(true);
+    // Simulate an early decode armed mid-slot against the current (FT8) grid.
+    bridge._earlyDecodeTimer = setTimeout(() => {}, 60000);
+    bridge._slotDecoded = true;
+    bridge.setVariant('FT4');
+    check(bridge._earlyDecodeTimer === null, 'setVariant() cancels a pending early-decode timer');
+    check(bridge._slotDecoded === false, 'setVariant() resets the early-decode flag so the new grid is decoded');
     bridge.stop();
   }
 

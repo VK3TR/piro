@@ -25,6 +25,36 @@ const PROTOCOLS = {
   FT4: { slotMs: FT4_SLOT_MS },
 };
 const MAX_KNOWN_CALLSIGNS = 500; // bounds the cross-slot hash-resolution memory; see ft8-decode-worker.js
+// How many ms before the slot boundary to decode. An FT8 signal ends ~1.9s
+// before the boundary (FT4 ~2.5s), so the slot can be decoded then instead of
+// waiting for the boundary -- which lets a guided reply be queued BEFORE the
+// boundary and go out in the very next slot, rather than a full parity cycle
+// later. The boundary handler then skips the slot it already decoded early.
+// 0 restores decode-at-boundary. Lower it if late-DT signals get clipped
+// (less audio captured), raise it for more decode headroom. See _handleBoundary().
+const FT8_EARLY_DECODE_MS = (() => {
+  const raw = process.env.FT8_EARLY_DECODE_MS;
+  if (raw == null || raw === '') return 2000;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 2000;
+})();
+// When set, logs each decode's timing (ms, captured audio, early vs boundary)
+// to the journal, for tuning FT8_EARLY_DECODE_MS against the real decode time.
+const FT8_DECODE_TIMING = /^(1|true)$/i.test(process.env.FT8_DECODE_TIMING || '');
+// How late AFTER a slot boundary we'll still START a transmission, instead of
+// waiting a whole parity cycle (~30s) for the next matching boundary. FT8/FT4
+// receivers decode by DT (offset from the slot start) and tolerate a couple
+// seconds of positive DT, and the ~12.6s (FT8) / ~4.5s (FT4) waveform still
+// fits before the next boundary -- so if a reply is ready within this window
+// of its slot's start, transmit it late in that slot rather than 15-30s later.
+// Clamped per-send so the whole waveform finishes before the next boundary.
+// 0 = only ever start exactly on the boundary (old behaviour). See send().
+const FT8_TX_GRACE_MS = (() => {
+  const raw = process.env.FT8_TX_GRACE_MS;
+  if (raw == null || raw === '') return 2000;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 2000;
+})();
 // Audio offset (Hz) within the FT8 passband used when a transmission
 // requests no more specific frequency at all (see send()'s optional
 // freqHz). 1500Hz — the conventional mid-passband default most FT8
@@ -216,6 +246,7 @@ class Ft8Bridge {
 
     this._active = false; // client has the FT8 panel open
     this._pttActive = false;
+    this._transmitting = false; // true while _transmitNow is keyed up; blocks a late-start overlap
     this._attached = false;
     this._rxChunks = [];
     this._spectrumChunks = [];
@@ -230,6 +261,8 @@ class Ft8Bridge {
     this._nextRequestId = 1;
     this._pendingTxMessage = null; // queued text, sent at the next boundary
     this._pttReleaseTimer = null;
+    this._earlyDecodeTimer = null; // fires the mid-slot early decode; see _handleBoundary
+    this._slotDecoded = false; // the current slot was decoded early, so the boundary skips it
 
     this._onPcmData = (chunk) => {
       this._rxChunks.push(chunk);
@@ -296,6 +329,7 @@ class Ft8Bridge {
     this.controlServer.off('ft8-disarm-auto', this._onDisarmAuto);
     this.slotClock.off('boundary', this._onBoundary);
     if (this._pttReleaseTimer) clearTimeout(this._pttReleaseTimer);
+    if (this._earlyDecodeTimer) clearTimeout(this._earlyDecodeTimer);
     for (const { reject } of this._pendingRequests.values()) reject(new Error('Ft8Bridge stopped'));
     this._pendingRequests.clear();
     if (typeof this.worker.terminate === 'function') this.worker.terminate();
@@ -351,6 +385,16 @@ class Ft8Bridge {
     this._protocol = variant;
     this.slotClock.setSlotMs(PROTOCOLS[variant].slotMs);
     this._rxChunks = [];
+    // Cancel an early decode armed against the OLD protocol's grid and clear
+    // the "decoded early" flag. Otherwise the stale timer fires mid-slot on
+    // the new protocol's audio, sets _slotDecoded, and the next boundary skips
+    // the new slot's full decode -- losing the first receive slot after the
+    // switch. The boundary fallback then decodes the new grid normally.
+    if (this._earlyDecodeTimer) {
+      clearTimeout(this._earlyDecodeTimer);
+      this._earlyDecodeTimer = null;
+    }
+    this._slotDecoded = false;
     this.cancelPendingTx('FT8/FT4 mode changed before this transmission went out');
   }
 
@@ -536,6 +580,24 @@ class Ft8Bridge {
       // boundary handler fires it only in the matching parity slot, and
       // _transmitNow writes the already-encoded audio with no encode on the
       // critical path.
+      // Late start: if we're already a little past the boundary of a slot this
+      // reply can go in (current slot's parity matches, or a parity-agnostic
+      // send), transmit NOW with a small positive DT rather than waiting a
+      // whole parity cycle. The window is clamped so the entire waveform still
+      // finishes before the next boundary, and skipped while already keyed.
+      // Timing comes from the slot clock (which owns 'now'), not Date.now().
+      const durationMs = (pcm.length / 2 / this.audioBridge.sampleRate) * 1000;
+      const curSlotStart = this.slotClock.nextSlotStart() - this.slotClock.slotMs;
+      const sinceBoundaryMs = this.slotClock.slotMs - this.slotClock.msUntilNextSlot();
+      const curParityOk = txParity == null || this.slotClock.slotParity(curSlotStart) === txParity;
+      const graceMs = Math.min(FT8_TX_GRACE_MS, Math.max(0, this.slotClock.slotMs - durationMs - this.pttReleaseMarginMs));
+      if (!this._transmitting && curParityOk && sinceBoundaryMs > 0 && sinceBoundaryMs <= graceMs) {
+        if (FT8_DECODE_TIMING) {
+          console.log(`[ft8] late start "${message}" ${Math.round(sinceBoundaryMs)}ms into the slot (DT ~+${(sinceBoundaryMs / 1000).toFixed(1)}s)`);
+        }
+        this._transmitNow({ message, freqHz: actualFreqHz, txParity, pcm, cqAttempt, cqTotal, resolve, reject });
+        return;
+      }
       this._pendingTxMessage = { message, freqHz: actualFreqHz, txParity, pcm, cqAttempt, cqTotal, resolve, reject };
       this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, {
         status: 'scheduled',
@@ -550,11 +612,20 @@ class Ft8Bridge {
 
   _handleBoundary({ slotStartMs, slotMs }) {
     // The slot that just *ended* is the one immediately before this
-    // boundary — decode whatever RX audio was captured during it.
-    if (this._attached && this._rxChunks.length > 0) {
+    // boundary — decode whatever RX audio was captured during it, UNLESS the
+    // early-decode timer already decoded it mid-slot (see the end of this
+    // method). The early path is what lets a guided reply be queued before
+    // this boundary; the boundary decode here is the fallback (e.g. the first
+    // slot after the panel opens, or FT8_EARLY_DECODE_MS = 0).
+    if (this._attached && !this._slotDecoded && this._rxChunks.length > 0) {
       this._decodeSlot(slotStartMs - slotMs, this._rxChunks);
     }
     this._rxChunks = [];
+    this._slotDecoded = false;
+    if (this._earlyDecodeTimer) {
+      clearTimeout(this._earlyDecodeTimer);
+      this._earlyDecodeTimer = null;
+    }
 
     if (this._pendingTxMessage) {
       const tx = this._pendingTxMessage;
@@ -567,13 +638,36 @@ class Ft8Bridge {
         this._transmitNow(tx);
       }
     }
+
+    // Decode the slot that just STARTED as soon as its signal has ended —
+    // FT8_EARLY_DECODE_MS before the next boundary — so a guided reply can be
+    // staged and queued before that boundary and transmit in this slot's
+    // opposite-parity slot instead of a parity cycle later. The next
+    // boundary's handler sees _slotDecoded and skips re-decoding it. The
+    // timer is unref'd so it never holds the process open (e.g. in tests).
+    if (this._attached && FT8_EARLY_DECODE_MS > 0) {
+      const delay = slotMs - FT8_EARLY_DECODE_MS;
+      if (delay > 0) {
+        const timer = setTimeout(() => {
+          this._earlyDecodeTimer = null;
+          if (this._attached && !this._slotDecoded && this._rxChunks.length > 0) {
+            this._slotDecoded = true;
+            this._decodeSlot(slotStartMs, this._rxChunks, { early: true });
+          }
+        }, delay);
+        if (typeof timer.unref === 'function') timer.unref();
+        this._earlyDecodeTimer = timer;
+      }
+    }
   }
 
-  _decodeSlot(slotStartMs, chunks) {
+  _decodeSlot(slotStartMs, chunks, { early = false } = {}) {
     let total = 0;
     for (const c of chunks) total += c.length;
     const combined = Buffer.concat(chunks, total);
     const sampleCount = Math.floor(combined.length / 2);
+    const decodeStartedAt = Date.now();
+    const capturedSec = sampleCount / this.audioBridge.sampleRate;
     const int16 = new Int16Array(sampleCount);
     for (let i = 0; i < sampleCount; i++) int16[i] = combined.readInt16LE(i * 2);
 
@@ -622,6 +716,13 @@ class Ft8Bridge {
           // QSO finished (self-disarm): drop the parity lock so the next QSO
           // re-locks to its own first-heard slot.
           if (!this._autoSequencer.active) this._autoReplySlotMs = null;
+        }
+        if (FT8_DECODE_TIMING) {
+          console.log(
+            `[ft8] decoded (${early ? 'early' : 'boundary'}): ${messages.length} msg in ` +
+              `${Date.now() - decodeStartedAt}ms, ${capturedSec.toFixed(1)}s audio` +
+              (early ? `, ~${FT8_EARLY_DECODE_MS}ms before the boundary` : '')
+          );
         }
       },
       reject: (err) => {
@@ -702,6 +803,7 @@ class Ft8Bridge {
   }
 
   async _transmitNow({ message, freqHz, pcm, cqAttempt, cqTotal, resolve, reject }) {
+    this._transmitting = true;
     const actualFreqHz = freqHz ?? this.txBaseFrequencyHz;
     try {
       this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'sending', message, freqHz: actualFreqHz, cqAttempt, cqTotal });
@@ -721,6 +823,20 @@ class Ft8Bridge {
       // The FT8 button turned DATA mode on; make sure it still is before
       // keying (a quick read when it is; see civ/data-mode-guard.js).
       await ensureDataMode(this.civ, true, { settleMs: this.dataSettleMs });
+      // The late-start fit was checked in send() BEFORE this DATA-mode settle
+      // (and any slow CI-V); recheck against the clock now so a transmission
+      // delayed by radio prep can't run past the next boundary into the
+      // peer's slot. If the waveform + PTT-release margin no longer fit, skip
+      // this transmission (the reply is lost for this slot rather than QRMing
+      // the peer) instead of keying up.
+      const msLeftNow = this.slotClock.msUntilNextSlot();
+      const needMs = (outPcm.length / 2 / this.audioBridge.sampleRate) * 1000 + this.pttReleaseMarginMs;
+      if (needMs > msLeftNow) {
+        this._transmitting = false;
+        this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'cancelled', message, reason: 'too late in the slot after radio preparation' });
+        resolve();
+        return;
+      }
       await this.controlServer.setPttFromServer(true);
       this.audioBridge.writeGenerated(outPcm);
 
@@ -736,6 +852,7 @@ class Ft8Bridge {
       await this.controlServer.setPttFromServer(false);
 
       this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'sent', message, freqHz: actualFreqHz, cqAttempt, cqTotal });
+      this._transmitting = false;
       resolve();
     } catch (err) {
       try {
@@ -746,6 +863,7 @@ class Ft8Bridge {
         // off within its own timeout regardless.
       }
       this.controlServer.broadcastJsonEvent(EVENT.FT8_TX_STATUS, { status: 'error', message, error: err.message });
+      this._transmitting = false;
       reject(err);
     }
   }
